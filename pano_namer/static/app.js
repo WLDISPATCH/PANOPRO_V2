@@ -81,7 +81,6 @@ const elements = {
   projectSelect: document.getElementById("project-select"),
   refreshButton: document.getElementById("refresh-button"),
   deleteProjectButton: document.getElementById("delete-project-button"),
-  homeOpenProcessButton: document.getElementById("home-open-process"),
   overlayImportButton: document.getElementById("overlay-import-button"),
   overlayReplaceButton: document.getElementById("overlay-replace-button"),
   overlayEmptyImportButton: document.getElementById("overlay-empty-import-button"),
@@ -109,13 +108,6 @@ const elements = {
   areaSyncResult: document.getElementById("area-sync-result"),
   appVersionBadge: document.getElementById("app-version-badge"),
   statusPill: document.getElementById("status-pill"),
-  dashboardProjectName: document.getElementById("dashboard-project-name"),
-  dashboardAreaCount: document.getElementById("dashboard-area-count"),
-  dashboardPendingCount: document.getElementById("dashboard-pending-count"),
-  dashboardProcessedCount: document.getElementById("dashboard-processed-count"),
-  dashboardArchiveCount: document.getElementById("dashboard-archive-count"),
-  dashboardCollectionCount: document.getElementById("dashboard-collection-count"),
-  dashboardLatestRun: document.getElementById("dashboard-latest-run"),
   tabs: [...document.querySelectorAll(".tab")],
   panels: [...document.querySelectorAll(".panel")],
   areasTable: document.getElementById("areas-table"),
@@ -621,8 +613,8 @@ function currentProject() {
 // between features) onto the six navigation destinations, optionally landing
 // on a specific mode inside a composite destination.
 const TAB_ROUTES = {
-  home: { tab: "home" },
-  dashboard: { tab: "home" },
+  home: { tab: "setup" },
+  dashboard: { tab: "setup" },
   setup: { tab: "setup" },
   areas: { tab: "setup" },
   overlay: { tab: "setup" },
@@ -994,7 +986,6 @@ function renderAll() {
   elements.renameButton.disabled = !hasTemplate;
   elements.deleteProjectButton.disabled = !hasTemplate;
   renderAppInfo();
-  renderDashboard(project);
   renderAreas();
   renderOverlayLibrary();
   renderPhotos();
@@ -1024,33 +1015,6 @@ function renderAppInfo() {
     Storage: ${state.appInfo.storage_dir}<br>
     Preview Cache: ${state.appInfo.overlay_preview_dir}<br>
     Thumbnails: ${state.appInfo.thumbnail_dir}
-  `;
-}
-
-
-function renderDashboard(project) {
-  elements.dashboardProjectName.textContent = project ? project.name : "No template selected";
-  elements.dashboardAreaCount.textContent = state.areas.length;
-  elements.dashboardPendingCount.textContent = pendingPhotos().length;
-  elements.dashboardProcessedCount.textContent = processedPhotos().length;
-  elements.dashboardArchiveCount.textContent = state.archivePhotos.length;
-  elements.dashboardCollectionCount.textContent = state.collections.length;
-
-  const latestRun = state.runs[0] || null;
-  if (!project) {
-    elements.dashboardLatestRun.textContent = "Select or create a template to review rename activity.";
-    return;
-  }
-  if (!latestRun) {
-    elements.dashboardLatestRun.textContent = "No rename run recorded for this template.";
-    return;
-  }
-  const summary = latestRun.summary || {};
-  elements.dashboardLatestRun.innerHTML = `
-    <strong>${latestRun.rollback_completed_at ? "Rolled back" : "Completed"}</strong><br>
-    Started: ${fmtDate(latestRun.started_at)}<br>
-    Completed: ${fmtDate(latestRun.completed_at)}<br>
-    ${summary.renamed || 0} renamed, ${summary.unchanged || 0} unchanged, ${summary.errors || 0} errors.
   `;
 }
 
@@ -4096,9 +4060,6 @@ elements.overlayImportButton.addEventListener("click", () => {
 });
 elements.overlayReplaceButton.addEventListener("click", () => {
   importOverlay().catch((error) => setStatus(error.message, true));
-});
-elements.homeOpenProcessButton.addEventListener("click", () => {
-  setTab("process");
 });
 elements.overlayWorkspace.addEventListener("click", (event) => {
   const button = event.target.closest("[data-overlay-action]");

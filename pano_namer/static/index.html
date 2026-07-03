@@ -22,8 +22,7 @@
         <p>Private industrial pano operations.</p>
       </div>
       <nav class="tabs sidebar-nav sidebar-nav-flat">
-        <button class="tab active" data-tab="home" type="button">Home</button>
-        <button class="tab" data-tab="setup" type="button">Setup</button>
+        <button class="tab active" data-tab="setup" type="button">Setup</button>
         <button class="tab" data-tab="process" type="button">Process</button>
         <button class="tab" data-tab="review" type="button">Review</button>
         <button class="tab" data-tab="completed" type="button">Completed</button>
@@ -52,40 +51,8 @@
 
       <main class="content">
 
-      <!-- ================= HOME ================= -->
-      <section class="panel dashboard-panel active" data-panel="home">
-        <div class="dashboard-hero">
-          <div>
-            <p class="eyebrow">PanoPro Control Room</p>
-            <h2>Home</h2>
-            <p>Pick a template in the top bar, check where it stands, and jump into the work.</p>
-          </div>
-          <div class="dashboard-project-card">
-            <span>Current Template</span>
-            <strong id="dashboard-project-name">No template selected</strong>
-          </div>
-        </div>
-
-        <div class="count-chips" aria-label="Project inventory">
-          <span class="count-chip"><b id="dashboard-area-count">0</b> Areas</span>
-          <span class="count-chip"><b id="dashboard-pending-count">0</b> Pending</span>
-          <span class="count-chip"><b id="dashboard-processed-count">0</b> Completed</span>
-          <span class="count-chip"><b id="dashboard-archive-count">0</b> Archived</span>
-          <span class="count-chip"><b id="dashboard-collection-count">0</b> Collections</span>
-        </div>
-
-        <div class="home-cta">
-          <button id="home-open-process" class="home-primary" type="button"><span>Open Process</span><small>Import, review matches, and export renamed panos</small></button>
-        </div>
-
-        <section class="subsection">
-          <h3>Latest Rename Run</h3>
-          <div id="dashboard-latest-run" class="dashboard-run-copy">No rename run recorded.</div>
-        </section>
-      </section>
-
       <!-- ================= SETUP ================= -->
-      <section class="panel" data-panel="setup">
+      <section class="panel active" data-panel="setup">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Project Setup</p>
