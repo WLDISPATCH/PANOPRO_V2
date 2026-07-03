@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PANO PRO</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/styles.css?v=2.7.0-dev">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="sidebar-brand">
+        <div class="brand-row">
+          <div class="brand-wordmark-card">
+            <img src="/static/brand-wordmark.png" alt="PANO PRO" class="brand-wordmark">
+          </div>
+          <h1 class="sr-only">PANO PRO</h1>
+          <span id="app-version-badge" class="app-version-badge">v-</span>
+        </div>
+        <p>Private industrial pano operations.</p>
+      </div>
+      <nav class="tabs sidebar-nav sidebar-nav-flat">
+        <button class="tab active" data-tab="home" type="button">Home</button>
+        <button class="tab" data-tab="setup" type="button">Setup</button>
+        <button class="tab" data-tab="process" type="button">Process</button>
+        <button class="tab" data-tab="review" type="button">Review</button>
+        <button class="tab" data-tab="completed" type="button">Completed</button>
+        <button class="tab" data-tab="system" type="button">System</button>
+      </nav>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-title">
+          <img src="/static/logo.svg" alt="" class="topbar-mark" aria-hidden="true">
+          <div>
+            <p class="eyebrow">Operations Command</p>
+            <h2>Project workspace</h2>
+          </div>
+        </div>
+        <section class="toolbar" aria-label="Project status and controls">
+          <label>
+            <span>Current Template</span>
+            <select id="project-select"></select>
+          </label>
+          <button id="refresh-button" class="secondary" type="button">Refresh</button>
+          <div id="status-pill" class="status-pill">No template selected</div>
+        </section>
+      </header>
+
+      <main class="content">
+
+      <!-- ================= HOME ================= -->
+      <section class="panel dashboard-panel active" data-panel="home">
+        <div class="dashboard-hero">
+          <div>
+            <p class="eyebrow">PanoPro Control Room</p>
+            <h2>Home</h2>
+            <p>Pick a template in the top bar, check where it stands, and jump into the work.</p>
+          </div>
+          <div class="dashboard-project-card">
+            <span>Current Template</span>
+            <strong id="dashboard-project-name">No template selected</strong>
+          </div>
+        </div>
+
+        <div class="count-chips" aria-label="Project inventory">
+          <span class="count-chip"><b id="dashboard-area-count">0</b> Areas</span>
+          <span class="count-chip"><b id="dashboard-pending-count">0</b> Pending</span>
+          <span class="count-chip"><b id="dashboard-processed-count">0</b> Completed</span>
+          <span class="count-chip"><b id="dashboard-archive-count">0</b> Archived</span>
+          <span class="count-chip"><b id="dashboard-collection-count">0</b> Collections</span>
+        </div>
+
+        <div class="home-cta">
+          <button id="home-open-process" class="home-primary" type="button"><span>Open Process</span><small>Import, review matches, and export renamed panos</small></button>
+        </div>
+
+        <section class="subsection">
+          <h3>Latest Rename Run</h3>
+          <div id="dashboard-latest-run" class="dashboard-run-copy">No rename run recorded.</div>
+        </section>
+      </section>
+
+      <!-- ================= SETUP ================= -->
+      <section class="panel" data-panel="setup">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Project Setup</p>
+            <h2>Setup</h2>
+            <p>Template, areas, and the map overlay in one place.</p>
+          </div>
+        </div>
+        <div class="panel-stack">
+          <section class="subsection">
+            <div class="subsection-head">
+              <h3>Template</h3>
+              <p>Create a new template or remove the current one.</p>
+            </div>
+            <div class="setup-template-row">
+              <form id="project-form" class="project-form">
+                <input id="project-name" type="text" placeholder="New template name" required>
+                <button type="submit">Create Template</button>
+              </form>
+              <button id="delete-project-button" class="danger secondary" type="button">Delete Template</button>
+            </div>
+          </section>
+
+          <section class="subsection">
+            <div class="subsection-head">
+              <h3>Areas</h3>
+              <p>Each row is one DXF or KML footprint with a user-managed area name.</p>
+              <div class="panel-actions">
+                <button id="add-area-button" type="button">Add Area File</button>
+                <button id="add-blank-area-button" type="button">Add Blank Area</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Area Name</th>
+                    <th>Source File</th>
+                    <th>Color</th>
+                    <th>CRS</th>
+                    <th>Bounds</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="areas-table"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="subsection">
+            <div class="subsection-head">
+              <h3>Overlay</h3>
+              <p>Georeferenced PDF used for site map context.</p>
+              <div class="panel-actions">
+                <button id="overlay-import-button" type="button">Import Overlay File</button>
+                <button id="overlay-replace-button" class="secondary" type="button">Replace Overlay</button>
+              </div>
+            </div>
+            <div id="overlay-workspace" class="overlay-workspace">
+              <section id="overlay-empty-state" class="overlay-empty-state">
+                <div>
+                  <p class="eyebrow">Overlay Workspace</p>
+                  <h3>No overlay loaded yet.</h3>
+                  <p>Import a PDF or supported overlay file to add map context.</p>
+                </div>
+                <button id="overlay-empty-import-button" type="button">Import Overlay File</button>
+              </section>
+              <section id="overlay-library-card" class="overlay-library-card" hidden>
+                <div class="overlay-card-head">
+                  <div>
+                    <p class="eyebrow">Active Overlay</p>
+                    <h3 id="overlay-card-title">Project Overlay</h3>
+                    <p id="overlay-card-note">This overlay is used in the Review map for site context.</p>
+                  </div>
+                  <div id="overlay-card-status" class="overlay-status-pill">Loaded</div>
+                </div>
+                <div class="table-wrap overlay-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Overlay Name</th>
+                        <th>Source File</th>
+                        <th>File Type</th>
+                        <th>Uploaded Date</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="overlay-table"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ================= PROCESS ================= -->
+      <section class="panel pending-panel" data-panel="process">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Import Review Queue</p>
+            <h2>Process</h2>
+            <p id="pending-guidance" class="process-guidance">Import DJI pano photos to start a review queue.</p>
+          </div>
+          <div class="panel-actions">
+            <button id="import-photos-button" type="button">Import Photos</button>
+            <button id="import-folder-button" class="secondary" type="button">Import Folders</button>
+          </div>
+        </div>
+
+        <div class="process-toolbar">
+          <div class="count-chips" aria-label="Pending review summary">
+            <span class="count-chip"><b id="pending-total-count">0</b> Pending</span>
+            <span class="count-chip ready"><b id="pending-ready-count">0</b> Ready</span>
+            <span class="count-chip warn"><b id="pending-attention-count">0</b> Attention</span>
+            <span class="count-chip"><b id="pending-nearest-count">0</b> Nearest</span>
+            <span class="count-chip warn"><b id="pending-metadata-count">0</b> Metadata</span>
+          </div>
+          <div class="process-toolbar-controls">
+            <label>
+              <span>Filter</span>
+              <select id="photo-filter">
+                <option value="all">All pending</option>
+                <option value="ready">Ready</option>
+                <option value="attention">Needs attention</option>
+                <option value="nearest">Nearest only</option>
+                <option value="errors">Errors only</option>
+              </select>
+            </label>
+            <label>
+              <span>Search</span>
+              <input id="pending-search" type="search" placeholder="Filename or area">
+            </label>
+            <label>
+              <span>Sort</span>
+              <select id="photo-sort">
+                <option value="date_desc">Date Taken: Newest</option>
+                <option value="date_asc">Date Taken: Oldest</option>
+                <option value="original_asc">Original Name: A-Z</option>
+                <option value="original_desc">Original Name: Z-A</option>
+                <option value="proposed_asc">Proposed Name: A-Z</option>
+                <option value="proposed_desc">Proposed Name: Z-A</option>
+              </select>
+            </label>
+            <div class="pending-column-toggles">
+              <label class="toggle-chip">
+                <input id="pending-show-original-toggle" type="checkbox" checked>
+                <span>Original Name</span>
+              </label>
+              <label class="toggle-chip">
+                <input id="pending-show-date-toggle" type="checkbox" checked>
+                <span>Date Taken</span>
+              </label>
+              <label class="toggle-chip">
+                <input id="pending-show-proposed-toggle" type="checkbox" checked>
+                <span>Proposed Name</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="pending-review-layout">
+          <div class="table-wrap pending-table-wrap">
+            <div class="queue-table-actions">
+              <div id="pending-count" class="panel-meta">0 files pending</div>
+              <div class="panel-actions">
+                <button id="select-all-pending-button" class="secondary" type="button">Select All</button>
+                <button id="remove-selected-pending-button" class="secondary" type="button">Remove Selected</button>
+              </div>
+            </div>
+            <table class="pending-table">
+              <thead>
+                <tr id="photos-header-row"></tr>
+              </thead>
+              <tbody id="photos-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="process-actionbar">
+          <button id="rename-button" type="button">Rename &amp; Export Eligible Photos</button>
+          <div class="process-actionbar-spacer"></div>
+          <button id="rollback-button" class="secondary" type="button">Rollback Last Run</button>
+          <button id="process-runs-toggle" class="secondary" type="button">Recent Runs ▾</button>
+        </div>
+
+        <section class="collapse-section" data-process-section="runs" hidden>
+          <div class="subsection-head">
+            <h3>Rename Runs</h3>
+            <p>Audit trail of applied rename batches.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Started</th>
+                  <th>Completed</th>
+                  <th>Batch</th>
+                  <th>Summary</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="runs-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ================= REVIEW ================= -->
+      <section class="panel review-hub-panel" data-panel="review">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Review Workspace</p>
+            <h2>Review</h2>
+            <p>One workspace for spatial review, 360 inspection, and bulk review.</p>
+          </div>
+          <div class="mode-switch" role="tablist" aria-label="Review mode">
+            <button class="mode-button active" data-review-mode="map" type="button">Map</button>
+            <button class="mode-button" data-review-mode="viewer" type="button">Viewer</button>
+            <button class="mode-button" data-review-mode="bulk" type="button">Bulk Review</button>
+          </div>
+        </div>
+
+        <!-- ---- Map mode ---- -->
+        <div class="mode-section active" data-review-section="map">
+          <div class="status-strip" aria-label="Map status summary">
+            <span class="status-chip"><b id="map-area-count">0</b> Areas</span>
+            <span class="status-chip"><b id="map-pending-count">0</b> Pending</span>
+            <span class="status-chip"><b id="map-processed-count">0</b> Processed</span>
+            <span class="status-chip">Selected: <b id="map-selected-label">None</b> <small id="map-selected-status">Select a pano point</small></span>
+            <span class="status-chip">Overlay: <b id="map-overlay-status">None</b></span>
+            <span class="status-chip"><b id="map-data-status">Waiting</b> <small id="map-data-detail">No template selected</small></span>
+          </div>
+
+          <div class="map-command-bar" aria-label="Map controls">
+            <div class="map-command-group">
+              <span>Layers</span>
+              <label class="toggle-chip">
+                <input id="map-show-processed-toggle" type="checkbox">
+                <span>Show Processed Panos</span>
+              </label>
+              <label class="toggle-chip">
+                <input id="map-labels-toggle" type="checkbox">
+                <span>Labels</span>
+              </label>
+              <label class="toggle-chip">
+                <input id="map-original-label-toggle" type="checkbox">
+                <span>Original Name</span>
+              </label>
+              <label class="toggle-chip">
+                <input id="map-proposed-label-toggle" type="checkbox" checked>
+                <span>Proposed Name</span>
+              </label>
+            </div>
+            <div class="map-command-group">
+              <span>Tools</span>
+              <button id="draw-area-button" class="secondary" type="button">Draw Area</button>
+              <button id="zoom-in-button" class="secondary" type="button">Zoom In</button>
+              <button id="zoom-out-button" class="secondary" type="button">Zoom Out</button>
+              <button id="zoom-reset-button" class="secondary" type="button">Reset View</button>
+            </div>
+          </div>
+
+          <div class="map-workspace">
+            <div class="map-stage">
+              <div id="map-canvas" class="map-canvas">
+                <div id="leaflet-map" class="leaflet-host"></div>
+                <div id="map-state-overlay" class="map-state-overlay" hidden></div>
+              </div>
+              <div class="map-legend" aria-label="Map legend">
+                <span><i class="legend-swatch area"></i>Area footprint</span>
+                <span><i class="legend-dot pending"></i>Pending pano</span>
+                <span><i class="legend-dot processed"></i>Processed pano</span>
+                <span><i class="legend-dot nearest"></i>Nearest/manual</span>
+                <span><i class="legend-dot error"></i>Error</span>
+                <span><i class="legend-ring"></i>Selected</span>
+              </div>
+            </div>
+            <aside id="map-detail" class="map-detail map-selection-card">
+              <div class="map-detail-head">
+                <p class="eyebrow">Selection</p>
+                <h3>Selected Pano</h3>
+              </div>
+              <div id="map-detail-body">Select a pano point on the map or a photo row to inspect details.</div>
+            </aside>
+          </div>
+        </div>
+
+        <!-- ---- Viewer mode ---- -->
+        <div class="mode-section" data-review-section="viewer">
+          <div class="status-strip" aria-label="Viewer status summary">
+            <span class="status-chip">Pano: <b id="viewer-selected-name">None</b> <small id="viewer-selected-state">Select a pano to begin</small></span>
+            <span class="status-chip">Area: <b id="viewer-area-name">-</b> <small id="viewer-match-mode">No match loaded</small></span>
+            <span class="status-chip">Captured: <b id="viewer-capture-date">-</b></span>
+            <span class="status-chip">Review: <b id="viewer-review-status">-</b> <small id="viewer-archive-status">Archive state</small></span>
+            <span class="status-chip"><b id="viewer-tags-count">0</b> Tags</span>
+            <span class="status-chip"><b id="viewer-issues-count">0</b> Issues</span>
+            <span class="status-chip"><b id="viewer-notes-count">0</b> Notes</span>
+          </div>
+
+          <div class="viewer-command-bar" aria-label="Viewer commands">
+            <div class="viewer-command-group">
+              <span>Navigate</span>
+              <button id="viewer-prev-button" class="secondary" type="button">Previous</button>
+              <button id="viewer-next-button" class="secondary" type="button">Next</button>
+              <button id="viewer-fullscreen-button" type="button">Full Screen</button>
+            </div>
+            <div class="viewer-command-group">
+              <span>Desktop</span>
+              <button id="viewer-open-file-button" class="secondary" type="button">Open File</button>
+              <button id="viewer-open-folder-button" class="secondary" type="button">Open Folder</button>
+              <button id="viewer-reveal-button" class="secondary" type="button">Reveal in Explorer</button>
+            </div>
+          </div>
+
+          <div class="viewer-layout viewer-review-layout">
+            <div class="viewer-stage">
+              <div class="viewer-stage-head">
+                <div>
+                  <span class="eyebrow">Pano viewport</span>
+                  <strong id="viewer-stage-title">No pano selected</strong>
+                </div>
+                <span id="viewer-stage-badge" class="badge warn">Waiting</span>
+              </div>
+              <div class="viewer-shell viewer-hero-shell">
+                <canvas id="viewer-canvas" class="viewer-canvas"></canvas>
+                <div id="viewer-overlay" class="viewer-overlay"></div>
+              </div>
+              <div id="viewer-empty-state" class="viewer-empty-state">Select a processed or archived pano from Process, Library, or the Map to start a 360 inspection.</div>
+            </div>
+            <aside class="viewer-sidebar viewer-review-sidebar">
+              <section class="viewer-card viewer-details-card">
+                <div class="viewer-card-head"><h3>Pano Details</h3><span id="viewer-detail-status" class="badge warn">No selection</span></div>
+                <div id="viewer-details-body" class="viewer-detail-grid"></div>
+                <div class="detail-actions viewer-detail-actions">
+                  <button id="viewer-open-map-button" class="secondary" type="button">Open Map</button>
+                  <button id="viewer-open-review-button" class="secondary" type="button">Open Bulk Review</button>
+                </div>
+              </section>
+              <section class="viewer-card orientation-card">
+                <div class="viewer-card-head"><h3>Orientation</h3><span class="badge">Viewer State</span></div>
+                <p class="viewer-helper">North offset aligns the compass overlay. Default yaw controls the starting view when this pano opens.</p>
+                <div class="orientation-grid">
+                  <label><span>North Offset</span><input id="viewer-north-offset" type="number" step="1"></label>
+                  <label><span>Default Yaw</span><input id="viewer-default-yaw" type="number" step="1"></label>
+                </div>
+                <button id="save-viewer-state-button" type="button">Save Orientation</button>
+              </section>
+              <section class="viewer-card">
+                <div class="viewer-card-head"><h3>Tags</h3><span id="viewer-tags-badge" class="badge">0</span></div>
+                <div id="viewer-tags-list" class="pill-list"></div>
+                <div class="detail-actions input-action-row">
+                  <input id="viewer-tag-name" type="text" placeholder="Add tag">
+                  <button id="add-viewer-tag-button" type="button">Add Tag</button>
+                </div>
+              </section>
+              <section class="viewer-card">
+                <div class="viewer-card-head"><h3>Notes</h3><span id="viewer-notes-badge" class="badge">0</span></div>
+                <textarea id="viewer-note-text" rows="3" placeholder="Add review note or field observation"></textarea>
+                <button id="add-note-button" type="button">Add Note</button>
+                <div id="viewer-notes-list" class="stack-list compact review-list"></div>
+              </section>
+              <section class="viewer-card">
+                <div class="viewer-card-head"><h3>Issues</h3><span id="viewer-issues-badge" class="badge warn">0</span></div>
+                <div class="detail-actions input-action-row">
+                  <input id="issue-title" type="text" placeholder="Issue title">
+                  <button id="add-issue-button" type="button">Add Issue</button>
+                </div>
+                <div id="viewer-issues-list" class="stack-list compact review-list"></div>
+              </section>
+              <section class="viewer-card">
+                <div class="viewer-card-head"><h3>Annotations</h3><span id="viewer-annotations-badge" class="badge">0</span></div>
+                <div class="detail-actions input-action-row">
+                  <input id="annotation-label" type="text" placeholder="Annotation label">
+                  <button id="add-annotation-button" type="button">Add Marker</button>
+                </div>
+                <div id="viewer-annotations-list" class="stack-list compact review-list"></div>
+              </section>
+              <section class="viewer-card">
+                <div class="viewer-card-head"><h3>Hotspots</h3><span id="viewer-hotspots-badge" class="badge">0</span></div>
+                <p class="viewer-helper">Hotspots support pano-to-pano navigation from within the 360 scene.</p>
+                <div class="detail-actions">
+                  <button id="add-hotspot-button" type="button">Add Hotspot</button>
+                </div>
+                <div id="viewer-hotspots-list" class="stack-list compact review-list"></div>
+              </section>
+            </aside>
+          </div>
+        </div>
+
+        <!-- ---- Bulk review mode ---- -->
+        <div class="mode-section" data-review-section="bulk">
+          <div class="subsection-head">
+            <h3>Bulk Review</h3>
+            <p>Review archived panos quickly with next/previous navigation and quick actions.</p>
+            <div class="panel-actions">
+              <button id="review-mark-button" type="button">Mark Reviewed</button>
+              <button id="review-archive-button" type="button">Archive to Folder</button>
+              <button id="review-add-to-collection-button" type="button">Add to Collection</button>
+            </div>
+          </div>
+          <div class="viewer-layout">
+            <div class="viewer-shell viewer-shell-compact">
+              <canvas id="review-viewer-canvas" class="viewer-canvas"></canvas>
+              <div id="review-viewer-overlay" class="viewer-overlay"></div>
+              <div class="viewer-nav">
+                <button id="review-prev-button" class="secondary" type="button">Previous</button>
+                <button id="review-next-button" class="secondary" type="button">Next</button>
+              </div>
+            </div>
+            <aside class="viewer-sidebar">
+              <section class="viewer-card">
+                <h3>Queue</h3>
+                <div id="review-queue-list" class="stack-list compact"></div>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= COMPLETED ================= -->
+      <section class="panel" data-panel="completed">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Rename Results</p>
+            <h2>Completed</h2>
+            <p>Panos renamed by a run move here so the Process queue stays clean.</p>
+          </div>
+          <div class="panel-actions">
+            <button id="select-all-processed-button" class="secondary" type="button">Select All</button>
+            <button id="remove-selected-processed-button" class="secondary" type="button">Remove Selected</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>File</th>
+                <th>Date</th>
+                <th>Area</th>
+                <th>Final Name</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="processed-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================= LIBRARY (hidden from nav, kept for future use) ================= -->
+      <section class="panel" data-panel="library">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Pano Library</p>
+            <h2>Library</h2>
+            <p>Archive folders and collections for organizing panos without moving files on disk.</p>
+          </div>
+          <div class="mode-switch" role="tablist" aria-label="Library mode">
+            <button class="mode-button active" data-library-mode="archive" type="button">Archive</button>
+            <button class="mode-button" data-library-mode="collections" type="button">Collections</button>
+          </div>
+        </div>
+
+        <div class="mode-section active" data-library-section="archive">
+          <div class="subsection-head">
+            <h3>Archive Folders</h3>
+            <p>Global virtual folders for organizing panos.</p>
+            <div class="panel-actions">
+              <input id="archive-folder-name" type="text" placeholder="New archive folder">
+              <button id="create-archive-folder-button" type="button">Create Folder</button>
+              <button id="archive-selected-button" type="button">Archive Selected</button>
+            </div>
+          </div>
+          <div class="split-layout">
+            <aside class="split-side">
+              <h3>Folders</h3>
+              <div id="archive-folders-list" class="stack-list"></div>
+            </aside>
+            <div class="split-main">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Thumb</th>
+                      <th>Pano</th>
+                      <th>Folder</th>
+                      <th>Tags</th>
+                      <th>Review</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="archive-photos-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mode-section" data-library-section="collections">
+          <div class="subsection-head">
+            <h3>Collections</h3>
+            <p>Cross-template pano groupings with map, list, viewer, and report export.</p>
+            <div class="panel-actions">
+              <input id="collection-name" type="text" placeholder="New collection">
+              <button id="create-collection-button" type="button">Create Collection</button>
+              <button id="add-selected-to-collection-button" type="button">Add Selected</button>
+              <button id="export-collection-csv-button" type="button">Export CSV</button>
+              <button id="export-collection-pdf-button" type="button">Export PDF</button>
+            </div>
+          </div>
+          <div class="split-layout">
+            <aside class="split-side">
+              <h3>Collections</h3>
+              <div id="collections-list" class="stack-list"></div>
+            </aside>
+            <div class="split-main collection-grid">
+              <div class="map-canvas collection-map">
+                <svg id="collection-map-svg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"></svg>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Thumb</th>
+                      <th>Pano</th>
+                      <th>Area</th>
+                      <th>Tags</th>
+                    </tr>
+                  </thead>
+                  <tbody id="collection-photos-table"></tbody>
+                </table>
+              </div>
+              <div class="viewer-shell viewer-shell-compact">
+                <canvas id="collection-viewer-canvas" class="viewer-canvas"></canvas>
+                <div id="collection-viewer-overlay" class="viewer-overlay"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SYSTEM ================= -->
+      <section class="panel" data-panel="system">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">System</p>
+            <h2>System</h2>
+            <p>Settings, activity history, and maintenance tools.</p>
+          </div>
+          <div class="mode-switch" role="tablist" aria-label="System mode">
+            <button class="mode-button active" data-system-mode="settings" type="button">Settings</button>
+            <button class="mode-button" data-system-mode="audit" type="button">Activity</button>
+            <button class="mode-button" data-system-mode="maintenance" type="button">Maintenance</button>
+          </div>
+        </div>
+
+        <div class="mode-section active" data-system-section="settings">
+          <div class="troubleshoot-grid">
+            <section class="troubleshoot-card">
+              <h3>Shared Pano Naming</h3>
+              <p class="muted">Share rename numbering with other computers through Supabase so two machines never create the same pano name. Photos and project data stay local.</p>
+              <label class="settings-field settings-field-inline">
+                <input id="shared-naming-enabled" type="checkbox">
+                <span>Enable shared pano naming</span>
+              </label>
+              <label class="settings-field">
+                <span>Supabase URL</span>
+                <input id="shared-naming-url" type="text" placeholder="https://yourproject.supabase.co" autocomplete="off">
+              </label>
+              <label class="settings-field">
+                <span>Supabase anon key</span>
+                <input id="shared-naming-key" type="password" placeholder="anon key" autocomplete="off">
+              </label>
+              <label class="settings-field">
+                <span>Computer name</span>
+                <input id="shared-naming-computer" type="text" autocomplete="off">
+              </label>
+              <label class="settings-field settings-field-inline">
+                <input id="shared-naming-sync-areas" type="checkbox">
+                <span>Sync areas between computers</span>
+              </label>
+              <p class="muted settings-hint">Area files (DXF/KML, including drawn areas) upload to Supabase Storage; templates with the same name stay in sync on every computer. Photos and overlays never sync.</p>
+              <div class="detail-actions">
+                <button id="shared-naming-save-button" type="button">Save Settings</button>
+                <button id="shared-naming-test-button" class="secondary" type="button">Test Connection</button>
+                <button id="area-sync-now-button" class="secondary" type="button">Sync Areas Now</button>
+              </div>
+              <div id="shared-naming-status" class="troubleshoot-copy muted">Loading shared naming settings.</div>
+              <div id="area-sync-result" class="troubleshoot-copy muted">No area sync run yet.</div>
+            </section>
+            <section class="troubleshoot-card">
+              <h3>Shared Registry</h3>
+              <p class="muted">Add this template's already-named panos (like 260702_OPTA_045) to the shared registry so numbering continues after them.</p>
+              <div class="detail-actions">
+                <button id="shared-naming-backfill-button" class="secondary" type="button">Scan &amp; Add Existing Names</button>
+              </div>
+              <div id="shared-naming-backfill-result" class="troubleshoot-copy muted">No scan run yet.</div>
+            </section>
+          </div>
+        </div>
+
+        <div class="mode-section" data-system-section="audit">
+          <div class="subsection-head">
+            <h3>Activity</h3>
+            <p>Local action history for imports, archive changes, collections, tags, review, and annotations.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Action</th>
+                  <th>Entity</th>
+                  <th>Payload</th>
+                </tr>
+              </thead>
+              <tbody id="audit-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="mode-section" data-system-section="maintenance">
+          <div class="troubleshoot-grid">
+            <section class="troubleshoot-card">
+              <h3>Latest Rename Run</h3>
+              <div id="troubleshoot-summary" class="troubleshoot-copy">No template selected.</div>
+            </section>
+            <section class="troubleshoot-card">
+              <h3>System</h3>
+              <div id="app-info-panel" class="troubleshoot-copy">Loading app info.</div>
+              <div class="detail-actions">
+                <button id="clear-unused-cache-button" class="secondary" type="button">Clear Unused Cache</button>
+              </div>
+              <div id="cache-cleanup-result" class="troubleshoot-copy muted">No cache cleanup run yet.</div>
+            </section>
+            <section class="troubleshoot-card">
+              <h3>Rollback Results</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Photo</th>
+                      <th>Status</th>
+                      <th>Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rollback-results-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+      </main>
+    </div>
+  </div>
+
+  <input id="area-file-input" type="file" accept=".dxf,.kml" hidden>
+  <input id="overlay-file-input" type="file" accept="application/pdf,.pdf,image/png,.png,image/jpeg,.jpg,.jpeg" hidden>
+  <input id="photo-file-input" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple hidden>
+  <input id="photo-folder-input" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple webkitdirectory directory hidden>
+
+
+  <div id="app-modal" class="app-modal" hidden>
+    <div class="app-modal-backdrop" data-modal-cancel></div>
+    <form id="app-modal-form" class="app-modal-card" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+      <div class="app-modal-head">
+        <p id="app-modal-kicker" class="eyebrow">PANO PRO</p>
+        <h2 id="app-modal-title">Action Required</h2>
+        <p id="app-modal-description">Complete this action to continue.</p>
+      </div>
+      <div id="app-modal-fields" class="app-modal-fields">
+        <label id="app-modal-text-wrap">
+          <span id="app-modal-text-label">Name</span>
+          <input id="app-modal-text-input" type="text" autocomplete="off">
+        </label>
+        <label id="app-modal-color-wrap">
+          <span>Color</span>
+          <input id="app-modal-color-input" type="color" value="#1195a8">
+        </label>
+      </div>
+      <div class="app-modal-actions">
+        <button id="app-modal-cancel-button" class="secondary" type="button" data-modal-cancel>Cancel</button>
+        <button id="app-modal-primary-button" type="submit">Continue</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="busy-overlay" class="busy-overlay" hidden>
+    <div class="busy-card" role="status" aria-live="polite" aria-busy="true">
+      <div class="busy-spinner"></div>
+      <div class="busy-copy">
+        <h2 id="busy-message">Working…</h2>
+        <p id="busy-detail">Please wait while the app finishes the current task.</p>
+      </div>
+      <div class="busy-bar" aria-hidden="true"><span></span></div>
+    </div>
+  </div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/app.js?v=2.7.0-dev"></script>
+</body>
+</html>

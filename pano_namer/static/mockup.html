@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PANO PRO — UI Mockup</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1519;
+    --panel: #182128;
+    --panel-soft: #212c34;
+    --ink: #edf2f4;
+    --muted: #a2afb7;
+    --line: #2f3d46;
+    --accent: #7a9f84;
+    --accent-deep: #31414b;
+    --accent-soft: #22312a;
+    --accent-lime: #b8db66;
+    --warn: #d88d51;
+    --danger: #d06a6a;
+    --map-bg: #162025;
+    --font-ui: "Aptos", "Segoe UI", Tahoma, sans-serif;
+    --font-display: "Bahnschrift SemiCondensed", "Aptos Narrow", "Arial Narrow", "Franklin Gothic Medium", sans-serif;
+    font-family: var(--font-ui);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background:
+      linear-gradient(135deg, rgba(184, 219, 102, 0.12) 0 8%, transparent 8% 100%),
+      radial-gradient(circle at top right, rgba(122, 159, 132, 0.08), transparent 24%),
+      linear-gradient(180deg, #11181d 0%, var(--bg) 100%);
+    color: var(--ink);
+    overflow: hidden;
+  }
+  body { display: flex; flex-direction: column; }
+
+  .mock-banner {
+    background: linear-gradient(90deg, rgba(184,219,102,0.22), rgba(122,159,132,0.18));
+    border-bottom: 1px solid rgba(184,219,102,0.35);
+    color: var(--ink);
+    padding: 8px 20px;
+    font-size: 0.82rem;
+    display: flex; gap: 12px; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .mock-banner strong { color: var(--accent-lime); letter-spacing: 0.06em; }
+  .mock-banner a { color: var(--accent-lime); }
+
+  .shell { flex: 1; min-height: 0; padding: 18px; display: flex; gap: 16px; }
+
+  .sidebar {
+    width: 190px; flex-shrink: 0;
+    background: rgba(24,33,40,0.94);
+    border: 1px solid rgba(47,61,70,0.92);
+    border-radius: 18px;
+    box-shadow: 0 20px 44px rgba(5,8,10,0.28);
+    padding: 18px 12px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .brand { padding: 0 8px 14px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+  .brand h1 { margin: 0; font-family: var(--font-display); font-size: 1.25rem; letter-spacing: 0.08em; }
+  .brand small { color: var(--muted); }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    background: none; border: none; color: var(--muted);
+    font: inherit; font-size: 0.95rem; text-align: left;
+    padding: 10px 12px; border-radius: 12px; cursor: pointer;
+  }
+  .nav-item:hover { background: rgba(122,159,132,0.10); color: var(--ink); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent-lime); font-weight: 600; }
+  .nav-item .glyph { width: 20px; text-align: center; opacity: 0.9; }
+  .sidebar-foot { margin-top: auto; padding: 10px 8px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.75rem; }
+
+  .workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .topbar {
+    background: rgba(24,33,40,0.94);
+    border: 1px solid rgba(47,61,70,0.92);
+    border-radius: 18px;
+    padding: 12px 18px;
+    display: flex; align-items: center; gap: 16px;
+    flex-shrink: 0;
+  }
+  .topbar h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; letter-spacing: 0.05em; }
+  .topbar .spacer { flex: 1; }
+  .template-chip {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel-soft); border: 1px solid var(--line);
+    border-radius: 999px; padding: 6px 14px; font-size: 0.85rem;
+  }
+  .template-chip b { color: var(--accent-lime); font-weight: 600; }
+  .status-pill { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 0.8rem; color: var(--muted); }
+
+  .view { flex: 1; min-height: 0; overflow: auto; display: none; }
+  .view.active { display: block; }
+  .panel {
+    background: rgba(24,33,40,0.94);
+    border: 1px solid rgba(47,61,70,0.92);
+    border-radius: 18px;
+    box-shadow: 0 20px 44px rgba(5,8,10,0.28);
+    padding: 20px;
+  }
+  .panel + .panel { margin-top: 12px; }
+  .panel h3 { margin: 0 0 4px; font-family: var(--font-display); letter-spacing: 0.04em; }
+  .panel .sub { margin: 0 0 14px; color: var(--muted); font-size: 0.85rem; }
+
+  button.btn {
+    border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel-soft); color: var(--ink);
+    padding: 9px 16px; font: inherit; font-size: 0.88rem; cursor: pointer;
+  }
+  button.btn:hover { border-color: var(--accent); }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #101815; font-weight: 700; }
+  button.btn.primary:hover { background: var(--accent-lime); border-color: var(--accent-lime); }
+  button.btn.ghost { background: none; }
+  button.btn.danger { color: var(--danger); }
+  input.field, select.field {
+    border-radius: 12px; border: 1px solid var(--line);
+    background: rgba(14,20,24,0.72); color: var(--ink);
+    padding: 9px 12px; font: inherit; font-size: 0.88rem;
+  }
+
+  .chip-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel-soft); color: var(--muted);
+    padding: 6px 13px; font-size: 0.82rem; cursor: default;
+  }
+  .chip b { color: var(--ink); font-weight: 700; }
+  .chip.clickable { cursor: pointer; }
+  .chip.clickable:hover { border-color: var(--accent); }
+  .chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-lime); }
+  .chip.active b { color: var(--accent-lime); }
+
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .dot.ready { background: var(--accent-lime); }
+  .dot.attention { background: var(--warn); }
+  .dot.error { background: var(--danger); }
+
+  table.mock { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  table.mock th { text-align: left; color: var(--muted); font-weight: 600; font-size: 0.76rem; letter-spacing: 0.05em; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  table.mock td { padding: 9px 10px; border-bottom: 1px solid rgba(47,61,70,0.5); }
+  table.mock tbody tr { cursor: pointer; }
+  table.mock tbody tr:hover { background: rgba(122,159,132,0.07); }
+  table.mock tbody tr.selected { background: var(--accent-soft); }
+  .thumb { width: 44px; height: 30px; border-radius: 6px; border: 1px solid var(--line); }
+  .mono { font-family: Consolas, monospace; font-size: 0.82rem; }
+  .muted { color: var(--muted); }
+
+  /* ------- Home ------- */
+  .home-hero { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+  .home-hero .pick { flex: 1; min-width: 280px; }
+  .home-hero label span { display: block; color: var(--muted); font-size: 0.8rem; margin-bottom: 6px; }
+  .home-counts { display: flex; gap: 8px; margin: 18px 0; flex-wrap: wrap; }
+  .home-activity { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); padding-top: 14px; margin-top: 6px; }
+
+  /* ------- Process ------- */
+  .process-wrap { display: flex; flex-direction: column; gap: 12px; height: 100%; }
+  .process-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; }
+  .process-body { flex: 1; min-height: 240px; display: flex; gap: 12px; }
+  .process-queue { flex: 1; min-width: 0; padding: 4px 8px 8px; overflow: auto; }
+  .process-rail { width: 300px; flex-shrink: 0; padding: 16px; overflow: auto; }
+  .process-rail h4 { margin: 0 0 2px; font-size: 0.95rem; }
+  .rail-map {
+    height: 130px; border-radius: 12px; border: 1px solid var(--line);
+    background:
+      radial-gradient(circle at 62% 40%, rgba(184,219,102,0.55) 0 5px, transparent 6px),
+      linear-gradient(rgba(122,159,132,0.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(122,159,132,0.12) 1px, transparent 1px),
+      var(--map-bg);
+    background-size: auto, 26px 26px, 26px 26px, auto;
+    position: relative; margin: 12px 0;
+  }
+  .rail-map::after { content: "map preview"; position: absolute; right: 8px; bottom: 6px; color: var(--muted); font-size: 0.7rem; }
+  .rail-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 0.83rem; margin: 10px 0; }
+  .rail-kv span { color: var(--muted); }
+  .process-actionbar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 14px 18px;
+  }
+  .shared-inline { display: flex; align-items: center; gap: 8px; font-size: 0.83rem; color: var(--muted); }
+  .shared-inline .dot { width: 8px; height: 8px; }
+  .runs-drawer { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 12px; }
+  .runs-drawer[hidden] { display: none; }
+
+  /* ------- Review ------- */
+  .review-layout { display: flex; gap: 12px; height: 100%; }
+  .review-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+  .stage-canvas {
+    flex: 1; min-height: 220px; border-radius: 14px; border: 1px solid var(--line);
+    background: radial-gradient(circle at 50% 45%, #2a3b42 0%, #16222a 65%, #101a20 100%);
+    display: flex; align-items: center; justify-content: center; color: var(--muted);
+  }
+  .queue-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .queue-strip .thumb { width: 72px; height: 46px; cursor: pointer; }
+  .queue-strip .thumb.selected { outline: 2px solid var(--accent-lime); }
+  .review-side { width: 280px; flex-shrink: 0; padding: 14px; display: flex; flex-direction: column; }
+  .side-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+  .side-tab { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 0.78rem; cursor: pointer; }
+  .side-tab.active { background: var(--accent-soft); color: var(--accent-lime); border-color: var(--accent); }
+  .side-body { font-size: 0.85rem; color: var(--muted); line-height: 1.5; }
+
+  /* ------- Library ------- */
+  .library-layout { display: flex; gap: 12px; height: 100%; }
+  .library-rail { width: 220px; flex-shrink: 0; padding: 16px; overflow: auto; }
+  .library-rail h4 { margin: 12px 0 6px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .library-rail h4:first-child { margin-top: 0; }
+  .rail-item { display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 8px; font-size: 0.86rem; cursor: pointer; color: var(--ink); }
+  .rail-item:hover { background: rgba(122,159,132,0.10); }
+  .rail-item.active { background: var(--accent-soft); color: var(--accent-lime); }
+  .rail-item span { color: var(--muted); }
+  .library-main { flex: 1; min-width: 0; padding: 16px; overflow: auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+  .grid-card { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; background: var(--panel-soft); }
+  .grid-card.selected { outline: 2px solid var(--accent-lime); }
+  .grid-card .gthumb { height: 90px; }
+  .grid-card .gmeta { padding: 8px 10px; font-size: 0.78rem; }
+  .grid-card .gmeta .mono { display: block; }
+  .grid-card .gmeta .muted { font-size: 0.72rem; }
+
+  /* ------- System ------- */
+  .sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+
+  /* ------- Modal ------- */
+  .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .modal[hidden] { display: none; }
+  .modal-backdrop { position: absolute; inset: 0; background: rgba(5,8,10,0.65); }
+  .modal-card {
+    position: relative; width: min(460px, 90vw);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 22px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  }
+  .modal-card h3 { margin: 0 0 6px; }
+  .modal-card .modal-lines { font-size: 0.88rem; color: var(--muted); line-height: 1.6; margin-bottom: 16px; }
+  .modal-card .modal-lines b { color: var(--accent-lime); }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+  .toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--accent-deep); border: 1px solid var(--accent);
+    color: var(--ink); border-radius: 999px; padding: 9px 20px; font-size: 0.85rem;
+    opacity: 0; transition: opacity 0.25s; pointer-events: none; z-index: 60;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div class="mock-banner">
+    <strong>MOCKUP</strong>
+    <span>Proposed UI with fake data — the real app is unchanged.</span>
+    <a href="/">Back to current app</a>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>PANO PRO</h1>
+        <small>proposed layout</small>
+      </div>
+      <button class="nav-item active" data-view="home"><span class="glyph">⌂</span>Home</button>
+      <button class="nav-item" data-view="setup"><span class="glyph">▦</span>Setup</button>
+      <button class="nav-item" data-view="process"><span class="glyph">⇄</span>Process</button>
+      <button class="nav-item" data-view="review"><span class="glyph">◉</span>Review</button>
+      <button class="nav-item" data-view="library"><span class="glyph">▤</span>Library</button>
+      <button class="nav-item" data-view="system"><span class="glyph">⚙</span>System</button>
+      <div class="sidebar-foot">6 destinations, flat.<br>Today: 14 tabs / 6 groups.</div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <h2 id="view-title">Home</h2>
+        <div class="spacer"></div>
+        <div class="template-chip">Template: <b>Workflow Test</b></div>
+        <div class="status-pill" id="mock-status">Mock ready</div>
+      </header>
+
+      <!-- ================= HOME ================= -->
+      <div class="view active" data-panel="home">
+        <div class="panel">
+          <div class="home-hero">
+            <div class="pick">
+              <h3>Start</h3>
+              <p class="sub">Pick a template, see where it stands, jump straight into the work.</p>
+              <label><span>Current template</span>
+                <select class="field" style="width: 100%;">
+                  <option>Workflow Test (EPSG:26912)</option>
+                  <option>North Site 2026</option>
+                  <option>+ Create new template…</option>
+                </select>
+              </label>
+            </div>
+            <button class="btn primary" style="padding: 14px 26px; font-size: 1rem;" data-goto="process">Open Process →</button>
+          </div>
+          <div class="home-counts">
+            <span class="chip"><b>2</b> Areas</span>
+            <span class="chip"><span class="dot attention"></span><b>8</b> Pending</span>
+            <span class="chip"><b>12</b> Processed</span>
+            <span class="chip"><b>5</b> Archived</span>
+          </div>
+          <div class="home-activity">
+            Last activity: rename run today 10:42 — 5 renamed (260702_OPTA_001–005) · shared naming <b style="color: var(--accent-lime);">connected</b>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= SETUP ================= -->
+      <div class="view" data-panel="setup">
+        <div class="panel">
+          <h3>Template</h3>
+          <p class="sub">Everything about this template in one place — including deleting it (was on Dashboard).</p>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <input class="field" value="Workflow Test" style="width: 240px;">
+            <button class="btn mock-action">Rename Template</button>
+            <button class="btn ghost danger mock-action">Delete Template</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Areas</h3>
+          <p class="sub">DXF/KML footprints and manual areas. One place, two buttons (overlay button removed from here).</p>
+          <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <button class="btn primary mock-action">Add Area File</button>
+            <button class="btn mock-action">Add Blank Area</button>
+          </div>
+          <table class="mock">
+            <thead><tr><th>Area</th><th>Source</th><th>Color</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr><td>OPTA</td><td class="muted">Manual only</td><td><span class="dot" style="background:#175c4c;"></span></td><td class="muted">Rename · Replace · Delete</td></tr>
+              <tr><td>TANK FARM</td><td class="mono muted">tank_farm.dxf</td><td><span class="dot" style="background:#3366cc;"></span></td><td class="muted">Rename · Replace · Delete</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Overlay</h3>
+          <p class="sub">One card, one action — no dead "Remove" button, no duplicate import elsewhere.</p>
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div class="thumb" style="width: 84px; height: 56px; background: var(--map-bg);"></div>
+            <div style="flex: 1;">
+              <div>site_plan_2026.pdf</div>
+              <div class="muted" style="font-size: 0.8rem;">Georeferenced · loaded 2026-06-12</div>
+            </div>
+            <button class="btn mock-action">Replace Overlay</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= PROCESS ================= -->
+      <div class="view" data-panel="process">
+        <div class="process-wrap">
+          <div class="panel process-toolbar">
+            <button class="btn primary mock-action">Import Photos</button>
+            <div class="chip-strip" id="process-chips">
+              <button class="chip clickable active" data-filter="all">All <b>8</b></button>
+              <button class="chip clickable" data-filter="ready"><span class="dot ready"></span>Ready <b>5</b></button>
+              <button class="chip clickable" data-filter="attention"><span class="dot attention"></span>Attention <b>2</b></button>
+              <button class="chip clickable" data-filter="error"><span class="dot error"></span>Errors <b>1</b></button>
+            </div>
+            <div class="spacer" style="flex: 1;"></div>
+            <input class="field" type="search" placeholder="Search name or area" style="width: 190px;">
+          </div>
+
+          <div class="process-body">
+            <div class="panel process-queue">
+              <table class="mock">
+                <thead>
+                  <tr><th></th><th>Photo</th><th>Original</th><th>Date</th><th>Area</th><th>Proposed Name</th></tr>
+                </thead>
+                <tbody id="queue-body"></tbody>
+              </table>
+            </div>
+            <aside class="panel process-rail" id="process-rail">
+              <h4 id="rail-title">Select a photo</h4>
+              <p class="sub" id="rail-sub">Click a row to inspect it here.</p>
+              <div class="rail-map"></div>
+              <div class="rail-kv" id="rail-kv"></div>
+              <div id="rail-assign" hidden>
+                <label style="display:block; margin-bottom: 8px;"><span class="muted" style="display:block; font-size:0.78rem; margin-bottom:4px;">Assign area</span>
+                  <select class="field" style="width: 100%;"><option>OPTA</option><option>TANK FARM</option></select>
+                </label>
+                <button class="btn mock-action" style="width: 100%;">Apply Assignment</button>
+              </div>
+            </aside>
+          </div>
+
+          <div class="panel">
+            <div class="process-actionbar">
+              <button class="btn primary" id="export-button" style="padding: 12px 24px;">Reserve Names &amp; Export</button>
+              <div class="shared-inline"><span class="dot ready"></span>Shared naming: Connected — 260702_OPTA next <b class="mono" style="color: var(--ink);">№006</b></div>
+              <div class="spacer" style="flex: 1;"></div>
+              <button class="btn ghost mock-action">Rollback Last Run</button>
+              <button class="btn ghost" id="runs-toggle">Recent Runs ▾</button>
+            </div>
+            <div class="runs-drawer" id="runs-drawer" hidden>
+              <table class="mock">
+                <thead><tr><th>When</th><th>Result</th><th>Names</th><th></th></tr></thead>
+                <tbody>
+                  <tr style="cursor: default;"><td>Today 10:42</td><td><span class="dot ready"></span> 5 renamed, 0 errors</td><td class="mono muted">260702_OPTA_001 – 005</td><td class="muted">Rollback available</td></tr>
+                  <tr style="cursor: default;"><td>Jun 28 15:03</td><td><span class="dot ready"></span> 12 renamed, 0 errors</td><td class="mono muted">260628_TANK_FARM_001 – 012</td><td class="muted">—</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= REVIEW ================= -->
+      <div class="view" data-panel="review">
+        <div class="review-layout">
+          <div class="panel review-stage">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <h3 style="margin: 0;">260702_OPTA_002.jpg</h3>
+              <span class="chip"><span class="dot ready"></span>Reviewed</span>
+              <div class="spacer" style="flex: 1;"></div>
+              <button class="btn mock-action">◀ Prev</button>
+              <button class="btn mock-action">Next ▶</button>
+              <button class="btn mock-action">Full Screen</button>
+            </div>
+            <div class="stage-canvas">360° pano viewport (drag to look around)</div>
+            <div class="queue-strip" id="review-strip"></div>
+          </div>
+          <aside class="panel review-side">
+            <div class="side-tabs" id="side-tabs">
+              <button class="side-tab active" data-side="details">Details</button>
+              <button class="side-tab" data-side="tags">Tags</button>
+              <button class="side-tab" data-side="notes">Notes</button>
+              <button class="side-tab" data-side="issues">Issues</button>
+              <button class="side-tab" data-side="hotspots">Hotspots</button>
+            </div>
+            <div class="side-body" id="side-body"></div>
+          </aside>
+        </div>
+      </div>
+
+      <!-- ================= LIBRARY ================= -->
+      <div class="view" data-panel="library">
+        <div class="library-layout">
+          <aside class="panel library-rail">
+            <h4>Archive Folders</h4>
+            <div class="rail-item active">All panos <span>17</span></div>
+            <div class="rail-item">2026 Inspections <span>9</span></div>
+            <div class="rail-item">Baseline <span>5</span></div>
+            <h4>Collections</h4>
+            <div class="rail-item">2026 Week 27 <span>5</span></div>
+            <div class="rail-item">Tank tops <span>4</span></div>
+            <h4>Tags</h4>
+            <div class="rail-item">area:OPTA <span>8</span></div>
+            <div class="rail-item">corrosion <span>3</span></div>
+          </aside>
+          <div class="panel library-main">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <input class="field" type="search" placeholder="Search panos" style="width: 220px;">
+              <div class="spacer" style="flex: 1;"></div>
+              <span class="muted" style="font-size: 0.83rem;" id="library-selection-hint">Select panos to archive, collect, or export</span>
+              <button class="btn mock-action" id="library-actions" hidden>Add to… ▾</button>
+              <button class="btn mock-action">Export Report</button>
+            </div>
+            <div class="grid" id="library-grid"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= SYSTEM ================= -->
+      <div class="view" data-panel="system">
+        <div class="sys-grid">
+          <div class="panel">
+            <h3>Shared Pano Naming</h3>
+            <p class="sub">Numbering shared through Supabase.</p>
+            <div class="chip-strip" style="margin-bottom: 12px;">
+              <span class="chip"><span class="dot ready"></span>Connected</span>
+              <span class="chip">Computer: <b>SHWILL</b></span>
+            </div>
+            <button class="btn mock-action">Open Settings</button>
+          </div>
+          <div class="panel">
+            <h3>Activity</h3>
+            <p class="sub">Runs + audit in one history (was two tabs).</p>
+            <select class="field" style="margin-bottom: 10px;"><option>All events</option><option>Rename runs</option><option>Imports</option><option>Review actions</option></select>
+            <table class="mock">
+              <tbody>
+                <tr style="cursor: default;"><td class="muted">10:42</td><td>Rename run · 5 renamed</td></tr>
+                <tr style="cursor: default;"><td class="muted">10:31</td><td>Imported 8 photos</td></tr>
+                <tr style="cursor: default;"><td class="muted">09:58</td><td>Area OPTA created</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <h3>Maintenance</h3>
+            <p class="sub">App info and recovery tools.</p>
+            <div class="muted" style="font-size: 0.83rem; margin-bottom: 12px;">v2.7.0-dev · EPSG:26912 · data: .pano_namer_data</div>
+            <button class="btn mock-action">Clear Unused Cache</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export confirm modal -->
+  <div class="modal" id="export-modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card">
+      <h3>Reserve Names &amp; Export</h3>
+      <div class="modal-lines">
+        Shared naming: <b>Connected</b><br>
+        260702_OPTA — 5 photos — names begin at <b>006</b><br><br>
+        Rename 5 eligible photos and leave 3 needing attention in the queue?
+      </div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn primary" id="export-confirm">Reserve Names &amp; Export</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  const PHOTOS = [
+    { name: "DJI_0231.jpg", date: "10:04", area: "OPTA",      proposed: "260702_OPTA_006.jpg",      state: "ready",     detail: "GPS inside OPTA footprint." },
+    { name: "DJI_0232.jpg", date: "10:06", area: "OPTA",      proposed: "260702_OPTA_007.jpg",      state: "ready",     detail: "GPS inside OPTA footprint." },
+    { name: "DJI_0233.jpg", date: "10:09", area: "OPTA",      proposed: "260702_OPTA_008.jpg",      state: "ready",     detail: "GPS inside OPTA footprint." },
+    { name: "DJI_0234.jpg", date: "10:15", area: "TANK FARM", proposed: "260702_TANK_FARM_003.jpg", state: "ready",     detail: "Nearest-area fallback (14 m outside footprint)." },
+    { name: "DJI_0235.jpg", date: "10:18", area: "TANK FARM", proposed: "260702_TANK_FARM_004.jpg", state: "ready",     detail: "GPS inside TANK FARM footprint." },
+    { name: "DJI_0236.jpg", date: "10:22", area: null,         proposed: null,                       state: "attention", detail: "No containing or nearby area. Assign manually." },
+    { name: "DJI_0237.jpg", date: "10:25", area: null,         proposed: null,                       state: "attention", detail: "Manual assignment cleared when area was deleted." },
+    { name: "DJI_0238.jpg", date: "—",     area: null,         proposed: null,                       state: "error",     detail: "Photo metadata did not contain GPS coordinates." },
+  ];
+  const THUMB_HUES = [155, 90, 205, 25, 260, 120, 320, 45];
+  const SIDE_CONTENT = {
+    details: "Area: OPTA · captured 2026-07-02 10:06<br>Renamed from DJI_0232.jpg in run #14<br>Archive: 2026 Inspections · Reviewed ✓",
+    tags: "area:OPTA · collection:2026 Week 27 · corrosion<br><br><i>+ add tag…</i>",
+    notes: "“North flange discoloration, compare next month.” — 10:44<br><br><i>+ add note…</i>",
+    issues: "1 open — “Guardrail bolt missing” (medium)<br><br><i>+ add issue…</i>",
+    hotspots: "→ 260702_OPTA_003.jpg (bearing 74°)<br><br><i>+ add hotspot…</i>",
+  };
+
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+  function toast(message) {
+    const el = $("#toast");
+    el.textContent = message;
+    el.classList.add("show");
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove("show"), 1800);
+  }
+
+  function thumbStyle(index, height) {
+    const hue = THUMB_HUES[index % THUMB_HUES.length];
+    return `background: linear-gradient(135deg, hsl(${hue},22%,30%), hsl(${hue},30%,18%));`;
+  }
+
+  // ---- navigation ----
+  const VIEW_TITLES = { home: "Home", setup: "Setup", process: "Process", review: "Review", library: "Library", system: "System" };
+  function setView(name) {
+    $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+    $$(".view").forEach((v) => v.classList.toggle("active", v.dataset.panel === name));
+    $("#view-title").textContent = VIEW_TITLES[name];
+  }
+  $$(".nav-item").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+  $$("[data-goto]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.goto)));
+
+  // ---- process queue ----
+  let activeFilter = "all";
+  let selectedIndex = -1;
+  function renderQueue() {
+    const body = $("#queue-body");
+    body.innerHTML = "";
+    PHOTOS.forEach((photo, index) => {
+      if (activeFilter !== "all" && photo.state !== activeFilter) return;
+      const tr = document.createElement("tr");
+      tr.className = index === selectedIndex ? "selected" : "";
+      tr.innerHTML = `
+        <td><span class="dot ${photo.state}"></span></td>
+        <td><div class="thumb" style="${thumbStyle(index)}"></div></td>
+        <td class="mono">${photo.name}</td>
+        <td class="muted">${photo.date}</td>
+        <td>${photo.area || '<span class="muted">— assign —</span>'}</td>
+        <td class="mono">${photo.proposed || '<span class="muted">·</span>'}</td>`;
+      tr.addEventListener("click", () => { selectedIndex = index; renderQueue(); renderRail(); });
+      body.appendChild(tr);
+    });
+  }
+  function renderRail() {
+    const photo = PHOTOS[selectedIndex];
+    if (!photo) return;
+    $("#rail-title").textContent = photo.name;
+    $("#rail-sub").textContent = photo.detail;
+    $("#rail-kv").innerHTML = `
+      <span>Status</span><span style="text-transform: capitalize;">${photo.state}</span>
+      <span>Captured</span><span>2026-07-02 ${photo.date}</span>
+      <span>Area</span><span>${photo.area || "—"}</span>
+      <span>Proposed</span><span class="mono">${photo.proposed || "—"}</span>`;
+    $("#rail-assign").hidden = photo.state === "ready";
+  }
+  $$("#process-chips .chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      activeFilter = chip.dataset.filter;
+      $$("#process-chips .chip").forEach((c) => c.classList.toggle("active", c === chip));
+      renderQueue();
+    });
+  });
+  renderQueue();
+
+  $("#runs-toggle").addEventListener("click", () => {
+    const drawer = $("#runs-drawer");
+    drawer.hidden = !drawer.hidden;
+    $("#runs-toggle").textContent = drawer.hidden ? "Recent Runs ▾" : "Recent Runs ▴";
+  });
+
+  // ---- export modal ----
+  $("#export-button").addEventListener("click", () => { $("#export-modal").hidden = false; });
+  $$("#export-modal [data-close]").forEach((el) => el.addEventListener("click", () => { $("#export-modal").hidden = true; }));
+  $("#export-confirm").addEventListener("click", () => {
+    $("#export-modal").hidden = true;
+    toast("Mock: 5 names reserved in Supabase, files renamed.");
+  });
+
+  // ---- review strip + side tabs ----
+  const strip = $("#review-strip");
+  for (let i = 0; i < 6; i++) {
+    const t = document.createElement("div");
+    t.className = "thumb" + (i === 1 ? " selected" : "");
+    t.style = thumbStyle(i);
+    t.addEventListener("click", () => {
+      $$("#review-strip .thumb").forEach((el) => el.classList.remove("selected"));
+      t.classList.add("selected");
+      toast("Mock: pano loaded in viewer.");
+    });
+    strip.appendChild(t);
+  }
+  function setSideTab(name) {
+    $$(".side-tab").forEach((b) => b.classList.toggle("active", b.dataset.side === name));
+    $("#side-body").innerHTML = SIDE_CONTENT[name];
+  }
+  $$(".side-tab").forEach((b) => b.addEventListener("click", () => setSideTab(b.dataset.side)));
+  setSideTab("details");
+
+  // ---- library grid ----
+  const grid = $("#library-grid");
+  const selected = new Set();
+  for (let i = 0; i < 12; i++) {
+    const card = document.createElement("div");
+    card.className = "grid-card";
+    card.innerHTML = `
+      <div class="gthumb" style="${thumbStyle(i)}"></div>
+      <div class="gmeta"><span class="mono">2607${String(i % 2 ? "02" : "01")}_${i % 3 ? "OPTA" : "TANK_FARM"}_${String((i % 5) + 1).padStart(3, "0")}.jpg</span>
+      <span class="muted">${i % 3 === 0 ? "2026 Inspections" : "Baseline"}</span></div>`;
+    card.addEventListener("click", () => {
+      card.classList.toggle("selected");
+      card.classList.contains("selected") ? selected.add(i) : selected.delete(i);
+      $("#library-actions").hidden = selected.size === 0;
+      $("#library-selection-hint").textContent = selected.size
+        ? `${selected.size} selected`
+        : "Select panos to archive, collect, or export";
+    });
+    grid.appendChild(card);
+  }
+
+  // ---- generic mock actions ----
+  $$(".mock-action").forEach((b) => b.addEventListener("click", () => toast("Mockup — this action isn't wired.")));
+</script>
+</body>
+</html>

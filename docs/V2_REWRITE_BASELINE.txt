@@ -1,0 +1,86 @@
+# PANO PRO V2 REWRITE BASELINE
+
+Date: 2026-03-17
+Status: active rewrite baseline
+
+Purpose
+-------
+This document is the implementation baseline for the v2 architecture rewrite.
+It exists inside the v2 repo so the rewrite can proceed there without depending
+on notes in the v1 workspace.
+
+Primary rule
+------------
+The rewrite must preserve the current v2 feature set while replacing the
+underlying architecture.
+
+Preserved v2 capabilities
+-------------------------
+- archive folders
+- collections
+- synchronized collection map/list/viewer workflow
+- 360 pano viewer
+- pano-to-pano hotspots
+- annotations
+- north/heading support
+- notes and issue pins
+- tags
+- duplicate review
+- thumbnails
+- bulk review
+- report export
+- audit history
+- weekly auto-collections
+
+Target stack
+------------
+- frontend: React + TypeScript + Vite
+- map: OpenLayers
+- pano viewer: Marzipano or Photo Sphere Viewer
+- backend: FastAPI
+- ORM/migrations: SQLAlchemy 2.x + Alembic
+- database: PostgreSQL + PostGIS
+- jobs: worker queue
+- desktop: thin PySide6 wrapper only
+
+Current rewrite objective
+-------------------------
+Start by introducing the new scaffold structure in this repo without breaking
+the current v2 application. The old app remains the functional path until each
+replacement slice reaches parity.
+
+Immediate scaffold goals
+------------------------
+1. Add explicit package boundaries for:
+   - api
+   - domain
+   - repositories
+   - workers
+2. Keep current runtime entry points intact.
+3. Add a parity/migration path before replacing UI or backend behavior.
+4. Prepare for a future Postgres/PostGIS move without forcing it in the same
+   commit as the scaffold.
+
+Near-term rewrite phases
+------------------------
+Phase 1:
+- scaffold backend package layout
+- keep current app behavior
+- start isolating API concerns from main.py
+
+Phase 2:
+- introduce SQLAlchemy models and Alembic
+- mirror current SQLite-backed concepts
+
+Phase 3:
+- design and move toward PostgreSQL + PostGIS
+
+Phase 4:
+- move heavy work to jobs
+
+Phase 5:
+- replace the frontend with a React/OpenLayers/viewer app
+
+Phase 6:
+- reduce desktop.py to a thin shell only
+
