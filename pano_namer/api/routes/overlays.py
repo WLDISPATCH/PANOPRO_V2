@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from pano_namer.config import AppConfig, FIXED_CRS
 from pano_namer.database import Database
-from pano_namer.schemas import OverlayCreate, OverlayResponse
+from pano_namer.schemas import OverlayCreate, OverlayResponse, OverlayUpdate
 from pano_namer.services.common import dumps_json, ensure_path, loads_json, utc_now
 from pano_namer.services.overlay import overlay_preview_dir, parse_overlay_metadata
 from pano_namer.services.storage import StorageService
@@ -37,9 +37,11 @@ async def save_overlay_upload(storage: StorageService, project_id: int, upload: 
 def row_to_overlay(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
+    source_path = row["jpg_original_path"] or row["jpg_managed_path"] or ""
     return {
         "id": row["id"],
         "project_id": row["project_id"],
+        "display_name": row["display_name"] or Path(source_path).stem or f"Overlay {row['id']}",
         "jpg_original_path": row["jpg_original_path"],
         "jpg_managed_path": row["jpg_managed_path"],
         "image_url": f"/api/overlays/{row['id']}/image",
@@ -60,10 +62,24 @@ def register_overlay_routes(app: FastAPI, cfg: AppConfig, db: Database, storage:
         with db.connect() as conn:
             fetch_project(conn, project_id)
             row = conn.execute(
-                "SELECT * FROM overlays WHERE project_id = ? AND active = 1 ORDER BY updated_at DESC LIMIT 1",
+                "SELECT * FROM overlays WHERE project_id = ? AND active = 1 ORDER BY created_at DESC, id DESC LIMIT 1",
                 (project_id,),
             ).fetchone()
         return row_to_overlay(row)
+
+    @app.get("/api/projects/{project_id}/overlays", response_model=list[OverlayResponse])
+    def list_overlays(project_id: int) -> list[dict[str, Any]]:
+        with db.connect() as conn:
+            fetch_project(conn, project_id)
+            rows = conn.execute(
+                """
+                SELECT * FROM overlays
+                WHERE project_id = ? AND active = 1
+                ORDER BY created_at DESC, id DESC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [row_to_overlay(row) for row in rows]
 
     def create_overlay_from_path(project_id: int, source_path: Path, original_path: Path | None = None) -> dict[str, Any]:
         display_path, crs, bounds, width, height, error = parse_overlay_metadata(
@@ -74,17 +90,19 @@ def register_overlay_routes(app: FastAPI, cfg: AppConfig, db: Database, storage:
         with db.connect() as conn:
             fetch_project(conn, project_id)
             conn.execute("UPDATE projects SET crs = ?, updated_at = ? WHERE id = ?", (FIXED_CRS, now, project_id))
-            conn.execute("UPDATE overlays SET active = 0 WHERE project_id = ?", (project_id,))
+            source_label = original_path or source_path
+            display_name = source_label.stem or "Project Overlay"
             cursor = conn.execute(
                 """
                 INSERT INTO overlays (
-                    project_id, jpg_original_path, jpg_managed_path, crs, bounds_json,
+                    project_id, display_name, jpg_original_path, jpg_managed_path, crs, bounds_json,
                     width, height, active, error, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     project_id,
+                    display_name,
                     str(original_path or source_path),
                     str(display_path),
                     crs or FIXED_CRS,
@@ -112,10 +130,50 @@ def register_overlay_routes(app: FastAPI, cfg: AppConfig, db: Database, storage:
         form = await request.form()
         file = form.get("file")
         filename = safe_upload_name(getattr(file, "filename", None))
-        if file is None or Path(filename).suffix.lower() != ".pdf":
-            raise HTTPException(status_code=400, detail="Overlay import requires a PDF file.")
+        if file is None or Path(filename).suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg"}:
+            raise HTTPException(status_code=400, detail="Overlay import requires a PDF, PNG, or JPG file.")
         source_path = await save_overlay_upload(storage, project_id, file)
         return create_overlay_from_path(project_id, source_path)
+
+    @app.patch("/api/projects/{project_id}/overlays/{overlay_id}", response_model=OverlayResponse)
+    def update_overlay(project_id: int, overlay_id: int, payload: OverlayUpdate) -> dict[str, Any]:
+        display_name = (payload.display_name or "").strip()
+        if not display_name:
+            raise HTTPException(status_code=400, detail="Overlay name is required.")
+        now = utc_now()
+        with db.connect() as conn:
+            fetch_project(conn, project_id)
+            cursor = conn.execute(
+                """
+                UPDATE overlays
+                SET display_name = ?, updated_at = ?
+                WHERE id = ? AND project_id = ? AND active = 1
+                """,
+                (display_name, now, overlay_id, project_id),
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Overlay not found")
+            conn.commit()
+            row = conn.execute("SELECT * FROM overlays WHERE id = ?", (overlay_id,)).fetchone()
+        return row_to_overlay(row)
+
+    @app.delete("/api/projects/{project_id}/overlays/{overlay_id}")
+    def delete_overlay(project_id: int, overlay_id: int) -> dict[str, bool]:
+        now = utc_now()
+        with db.connect() as conn:
+            fetch_project(conn, project_id)
+            cursor = conn.execute(
+                """
+                UPDATE overlays
+                SET active = 0, updated_at = ?
+                WHERE id = ? AND project_id = ? AND active = 1
+                """,
+                (now, overlay_id, project_id),
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Overlay not found")
+            conn.commit()
+        return {"deleted": True}
 
     @app.get("/api/overlays/{overlay_id}/image")
     def overlay_image(overlay_id: int) -> FileResponse:

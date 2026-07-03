@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE TABLE IF NOT EXISTS overlays (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    display_name TEXT,
     jpg_original_path TEXT NOT NULL,
     jpg_managed_path TEXT NOT NULL,
     crs TEXT,
@@ -556,6 +557,24 @@ def _migrate_area_sync_uid(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE areas ADD COLUMN sync_uid TEXT")
 
 
+def _migrate_overlay_display_name(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "overlays")
+    if "display_name" not in columns:
+        conn.execute("ALTER TABLE overlays ADD COLUMN display_name TEXT")
+    rows = conn.execute(
+        "SELECT id, display_name, jpg_original_path, jpg_managed_path FROM overlays"
+    ).fetchall()
+    for row in rows:
+        if row["display_name"]:
+            continue
+        source_path = row["jpg_original_path"] or row["jpg_managed_path"] or ""
+        display_name = Path(source_path).stem or f"Overlay {row['id']}"
+        conn.execute(
+            "UPDATE overlays SET display_name = ? WHERE id = ?",
+            (display_name, row["id"]),
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     ("20260508_0001_area_display_colors", _migrate_area_display_colors),
     ("20260508_0002_rename_run_rollback_columns", _migrate_rename_run_rollback_columns),
@@ -570,6 +589,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     ("20260512_0008_users_admin", _migrate_users_admin),
     ("20260702_0009_app_settings", _migrate_app_settings),
     ("20260702_0010_area_sync_uid", _migrate_area_sync_uid),
+    ("20260703_0011_overlay_display_name", _migrate_overlay_display_name),
 )
 
 

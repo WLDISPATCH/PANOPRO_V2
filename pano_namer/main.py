@@ -139,9 +139,11 @@ def row_to_area(row: sqlite3.Row) -> dict[str, Any]:
 def row_to_overlay(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
+    source_path = row["jpg_original_path"] or row["jpg_managed_path"] or ""
     return {
         "id": row["id"],
         "project_id": row["project_id"],
+        "display_name": row["display_name"] or Path(source_path).stem or f"Overlay {row['id']}",
         "jpg_original_path": row["jpg_original_path"],
         "jpg_managed_path": row["jpg_managed_path"],
         "image_url": f"/api/overlays/{row['id']}/image",
@@ -1513,7 +1515,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 (project_id,),
             ).fetchall()
             overlay_row = conn.execute(
-                "SELECT * FROM overlays WHERE project_id = ? AND active = 1 ORDER BY updated_at DESC LIMIT 1",
+                "SELECT * FROM overlays WHERE project_id = ? AND active = 1 ORDER BY created_at DESC, id DESC LIMIT 1",
                 (project_id,),
             ).fetchone()
 

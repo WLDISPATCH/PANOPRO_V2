@@ -125,9 +125,14 @@ class OverlayCreate(BaseModel):
     source_path: str
 
 
+class OverlayUpdate(BaseModel):
+    display_name: str | None = None
+
+
 class OverlayResponse(BaseModel):
     id: int
     project_id: int
+    display_name: str | None = None
     jpg_original_path: str
     jpg_managed_path: str
     image_url: str | None = None

@@ -14,6 +14,7 @@ const state = {
   areas: [],
   photos: [],
   overlay: null,
+  overlays: [],
   runs: [],
   mapData: null,
   mapDataLoading: false,
@@ -779,6 +780,7 @@ async function loadProjects() {
     state.areas = [];
     state.photos = [];
     state.overlay = null;
+    state.overlays = [];
     state.runs = [];
     state.archiveFolders = [];
     state.archivePhotos = [];
@@ -827,6 +829,7 @@ async function refreshProjectData() {
     state.areas = [];
     state.photos = [];
     state.overlay = null;
+    state.overlays = [];
     state.runs = [];
     state.archiveFolders = [];
     state.archivePhotos = [];
@@ -844,10 +847,11 @@ async function refreshProjectData() {
     return;
   }
   const projectId = state.currentProjectId;
-  const [areas, photos, overlay, runs, archiveLibrary, collections, tags, savedFilters, duplicatePairs, auditEvents] = await Promise.all([
+  const [areas, photos, overlay, overlays, runs, archiveLibrary, collections, tags, savedFilters, duplicatePairs, auditEvents] = await Promise.all([
     api(`/api/projects/${projectId}/areas`),
     api(`/api/projects/${projectId}/photos`),
     api(`/api/projects/${projectId}/overlay`),
+    api(`/api/projects/${projectId}/overlays`),
     api(`/api/projects/${projectId}/rename-runs`),
     api(`/api/archive/library`),
     api(`/api/collections`),
@@ -859,6 +863,7 @@ async function refreshProjectData() {
   state.areas = areas;
   state.photos = photos;
   state.overlay = overlay;
+  state.overlays = overlays;
   state.runs = runs;
   state.archiveFolders = archiveLibrary.folders || [];
   state.archivePhotos = archiveLibrary.photos || [];
@@ -1107,17 +1112,32 @@ function overlayStatus() {
   return { label: "Map ready", kind: "" };
 }
 
+function overlayDisplayName(overlay) {
+  if (!overlay) return "";
+  const sourcePath = overlay.jpg_original_path || overlay.jpg_managed_path || "";
+  return overlay.display_name || stemName(sourcePath) || `Overlay ${overlay.id || ""}`.trim();
+}
+
+function overlayRowStatus(overlay) {
+  if (!overlay) return { label: "Not loaded", kind: "warn" };
+  if (overlay.error) return { label: "Needs review", kind: "error" };
+  if (!overlay.bounds) return { label: "Loaded", kind: "warn" };
+  return { label: "Map ready", kind: "" };
+}
+
 function renderOverlayLibrary() {
   if (!elements.overlayWorkspace) return;
   const hasTemplate = Boolean(state.currentProjectId);
-  const overlay = state.overlay || null;
-  const hasOverlay = Boolean(overlay);
+  const overlays = state.overlays?.length ? state.overlays : (state.overlay ? [state.overlay] : []);
+  const overlay = state.overlay || overlays[0] || null;
+  const hasOverlay = overlays.length > 0;
   const status = overlayStatus();
 
   elements.overlayImportButton.disabled = !hasTemplate;
   elements.overlayReplaceButton.disabled = !hasTemplate || !hasOverlay;
   elements.overlayEmptyImportButton.disabled = !hasTemplate;
-  elements.overlayImportButton.textContent = hasOverlay ? "Replace Overlay" : "Import Overlay File";
+  elements.overlayImportButton.textContent = hasOverlay ? "Import More Overlays" : "Import Overlay File";
+  elements.overlayReplaceButton.textContent = "Import More Overlays";
 
   elements.overlayEmptyState.hidden = hasOverlay;
   elements.overlayLibraryCard.hidden = !hasOverlay;
@@ -1151,33 +1171,37 @@ function renderOverlayLibrary() {
     return;
   }
 
-  const sourcePath = overlay.jpg_original_path || overlay.jpg_managed_path || "";
-  const overlayName = stemName(sourcePath) || `Overlay ${overlay.id || ""}`.trim();
+  const sourcePath = overlay?.jpg_original_path || overlay?.jpg_managed_path || "";
+  const overlayName = overlayDisplayName(overlay);
   const uploadedDate = overlay.updated_at || overlay.created_at || "";
-  elements.overlayCardTitle.textContent = overlayName;
+  elements.overlayCardTitle.textContent = `${overlays.length} Overlay${overlays.length === 1 ? "" : "s"}`;
   elements.overlayCardNote.textContent = overlay.error
     ? "This overlay is loaded, but PanoPro could not read all map registration metadata."
-    : "This overlay is used in the Map workspace for site context.";
+    : `${overlayName} is the newest overlay and is used in the Map workspace for site context.`;
   elements.overlayCardStatus.textContent = status.label;
   elements.overlayCardStatus.className = `overlay-status-pill ${status.kind}`.trim();
-  elements.overlayTable.innerHTML = `
-    <tr>
-      <td><strong>${escapeHtml(overlayName)}</strong></td>
-      <td title="${escapeHtml(sourcePath)}">${escapeHtml(shortPath(sourcePath))}</td>
-      <td>${escapeHtml(fileExtension(sourcePath))}</td>
-      <td>${escapeHtml(fmtDate(uploadedDate))}</td>
-      <td>${badge(escapeHtml(status.label), status.kind)}${overlay.error ? `<div class="overlay-warning">${escapeHtml(overlay.error)}</div>` : ""}</td>
-      <td>
-        <div class="inline-actions">
-          <button class="secondary" type="button" data-overlay-action="replace">Replace File</button>
-          <button class="secondary" type="button" data-overlay-action="reimport">Re-import</button>
-          <button class="secondary" type="button" data-overlay-action="open-map">Open Map</button>
-          <button class="secondary" type="button" disabled title="Overlay rename needs backend support.">Rename</button>
-          <button class="danger" type="button" disabled title="Overlay removal needs backend support.">Delete</button>
-        </div>
-      </td>
-    </tr>
-  `;
+  elements.overlayTable.innerHTML = overlays.map((item) => {
+    const rowSourcePath = item.jpg_original_path || item.jpg_managed_path || "";
+    const rowStatus = overlayRowStatus(item);
+    const rowName = overlayDisplayName(item);
+    const isMapOverlay = overlay && item.id === overlay.id;
+    return `
+      <tr>
+        <td><strong>${escapeHtml(rowName)}</strong>${isMapOverlay ? `<div class="muted">Map overlay</div>` : ""}</td>
+        <td title="${escapeHtml(rowSourcePath)}">${escapeHtml(shortPath(rowSourcePath))}</td>
+        <td>${escapeHtml(fileExtension(rowSourcePath))}</td>
+        <td>${escapeHtml(fmtDate(item.updated_at || item.created_at || ""))}</td>
+        <td>${badge(escapeHtml(rowStatus.label), rowStatus.kind)}${item.error ? `<div class="overlay-warning">${escapeHtml(item.error)}</div>` : ""}</td>
+        <td>
+          <div class="inline-actions">
+            <button class="secondary" type="button" data-overlay-action="rename" data-overlay-id="${item.id}">Rename</button>
+            <button class="secondary" type="button" data-overlay-action="open-map" data-overlay-id="${item.id}">Open Map</button>
+            <button class="danger" type="button" data-overlay-action="delete" data-overlay-id="${item.id}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
 }
 
 function filteredPhotos() {
@@ -2866,30 +2890,75 @@ async function importOverlay() {
     setStatus("Create or select a template before importing an overlay.", true);
     return;
   }
-  let sourceLabel = "selected PDF";
+  let sourceLabels = [];
   if (usingDesktopBridge()) {
-    const [path] = await pickPaths("overlay");
-    if (!path) return;
-    sourceLabel = shortPath(path);
-    await api(`/api/projects/${state.currentProjectId}/overlay`, {
-      method: "POST",
-      body: JSON.stringify({ source_path: path }),
-    });
+    const paths = await pickPaths("overlay");
+    if (!paths.length) return;
+    sourceLabels = paths.map(shortPath);
+    for (const path of paths) {
+      await api(`/api/projects/${state.currentProjectId}/overlay`, {
+        method: "POST",
+        body: JSON.stringify({ source_path: path }),
+      });
+    }
   } else {
-    const [file] = await chooseBrowserFiles(elements.overlayFileInput);
-    if (!file) return;
-    sourceLabel = file.name;
-    const formData = new FormData();
-    formData.append("file", file, file.webkitRelativePath || file.name);
-    await api(`/api/projects/${state.currentProjectId}/overlay/upload`, {
-      method: "POST",
-      body: formData,
-      timeoutMs: 0,
-    });
+    const files = await chooseBrowserFiles(elements.overlayFileInput);
+    if (!files.length) return;
+    sourceLabels = files.map((file) => file.name);
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("file", file, file.webkitRelativePath || file.name);
+      await api(`/api/projects/${state.currentProjectId}/overlay/upload`, {
+        method: "POST",
+        body: formData,
+        timeoutMs: 0,
+      });
+    }
   }
   await refreshProjectData();
-  setStatus(`Imported overlay from ${sourceLabel}.`);
+  setStatus(sourceLabels.length === 1
+    ? `Imported overlay from ${sourceLabels[0]}.`
+    : `Imported ${sourceLabels.length} overlays.`);
   setTab("overlay");
+}
+
+async function renameOverlay(overlayId) {
+  const overlay = (state.overlays || []).find((item) => item.id === overlayId);
+  if (!state.currentProjectId || !overlay) return;
+  const currentName = overlayDisplayName(overlay);
+  const name = await showTextModal({
+    title: "Rename Overlay",
+    description: "Update the overlay name shown in the setup library.",
+    primaryLabel: "Rename Overlay",
+    textLabel: "Overlay name",
+    textValue: currentName,
+    textPlaceholder: "Overlay name",
+  });
+  if (!name.trim() || name.trim() === currentName) return;
+  await api(`/api/projects/${state.currentProjectId}/overlays/${overlayId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ display_name: name.trim() }),
+  });
+  await refreshProjectData();
+  setStatus(`Renamed overlay to "${name.trim()}".`);
+}
+
+async function deleteOverlay(overlayId) {
+  const overlay = (state.overlays || []).find((item) => item.id === overlayId);
+  if (!state.currentProjectId || !overlay) return;
+  const name = overlayDisplayName(overlay);
+  const accepted = await showDecisionModal({
+    title: "Delete Overlay",
+    description: `Remove "${name}" from this template? The source file will stay on disk.`,
+    primaryLabel: "Delete Overlay",
+    danger: true,
+  });
+  if (!accepted) return;
+  await api(`/api/projects/${state.currentProjectId}/overlays/${overlayId}`, {
+    method: "DELETE",
+  });
+  await refreshProjectData();
+  setStatus(`Deleted overlay "${name}".`);
 }
 
 async function importPhotos(paths) {
@@ -4032,10 +4101,20 @@ elements.homeOpenProcessButton.addEventListener("click", () => {
   setTab("process");
 });
 elements.overlayWorkspace.addEventListener("click", (event) => {
-  const action = event.target.closest("[data-overlay-action]")?.dataset.overlayAction;
+  const button = event.target.closest("[data-overlay-action]");
+  const action = button?.dataset.overlayAction;
   if (!action) return;
   if (action === "replace" || action === "reimport") {
     importOverlay().catch((error) => setStatus(error.message, true));
+    return;
+  }
+  const overlayId = Number(button.dataset.overlayId) || null;
+  if (action === "rename" && overlayId) {
+    renameOverlay(overlayId).catch((error) => setStatus(error.message, true));
+    return;
+  }
+  if (action === "delete" && overlayId) {
+    deleteOverlay(overlayId).catch((error) => setStatus(error.message, true));
     return;
   }
   if (action === "open-map") {
