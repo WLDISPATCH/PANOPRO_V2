@@ -345,7 +345,7 @@ def register_smart_routes(
                     ftp_export.UploadItem(
                         photo_id=row["id"],
                         path=path,
-                        remote_subdir=_dated_folder_name(row["capture_ts"]),
+                        remote_subdir=f"{_dated_folder_name(row['capture_ts'])}/PANOS",
                     )
                 )
             try:
@@ -393,7 +393,9 @@ def register_smart_routes(
                     failed += 1
                     errors.append(f"Missing file, cannot archive: {source.name}")
                     continue
-                target_dir = archive_base / _dated_folder_name(row["capture_ts"])
+                target_dir = (
+                    archive_base / _dated_folder_name(row["capture_ts"]) / "PANOS"
+                )
                 target = target_dir / source.name
                 try:
                     target_dir.mkdir(parents=True, exist_ok=True)

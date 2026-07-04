@@ -15,3 +15,4 @@ sqladmin
 sqlalchemy
 passlib[bcrypt]
 paramiko==3.5.1
+httpx==0.28.1
