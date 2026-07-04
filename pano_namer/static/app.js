@@ -243,8 +243,6 @@ const elements = {
   mapLabelsToggle: document.getElementById("map-labels-toggle"),
   mapOriginalLabelToggle: document.getElementById("map-original-label-toggle"),
   mapProposedLabelToggle: document.getElementById("map-proposed-label-toggle"),
-  zoomInButton: document.getElementById("zoom-in-button"),
-  zoomOutButton: document.getElementById("zoom-out-button"),
   zoomResetButton: document.getElementById("zoom-reset-button"),
   runsTable: document.getElementById("runs-table"),
   troubleshootSummary: document.getElementById("troubleshoot-summary"),
@@ -2565,15 +2563,6 @@ function resetMapView() {
   fitMapToData(state.leaflet);
 }
 
-function zoomMap(direction) {
-  if (!state.leaflet) return;
-  if (direction === "in") {
-    state.leaflet.map.zoomIn();
-  } else {
-    state.leaflet.map.zoomOut();
-  }
-}
-
 function centerMapOnPhoto(photoId, zoomIn = false) {
   const leaf = state.leaflet;
   const photo = state.photos.find((item) => item.id === photoId);
@@ -4386,8 +4375,6 @@ elements.mapDetail.addEventListener("focusout", handleMapDetailFocusOut);
 document.addEventListener("click", handleDocumentClick);
 document.addEventListener("click", handleCustomSelectClick);
 document.addEventListener("fullscreenchange", renderViewer);
-elements.zoomInButton.addEventListener("click", () => zoomMap("in"));
-elements.zoomOutButton.addEventListener("click", () => zoomMap("out"));
 elements.mapLabelsToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapOriginalLabelToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapProposedLabelToggle.addEventListener("change", handleMapLabelToggleChange);
