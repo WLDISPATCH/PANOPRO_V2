@@ -215,7 +215,6 @@
                   <th>Batch</th>
                   <th>Summary</th>
                   <th>Status</th>
-                  <th>Action</th>
                 </tr>
               </thead>
               <tbody id="runs-table"></tbody>
@@ -536,12 +535,11 @@
           <div>
             <p class="eyebrow">System</p>
             <h2>System</h2>
-            <p>Settings, activity history, and maintenance tools.</p>
+            <p>Settings and activity history.</p>
           </div>
           <div class="mode-switch" role="tablist" aria-label="System mode">
             <button class="mode-button active" data-system-mode="settings" type="button">Settings</button>
             <button class="mode-button" data-system-mode="audit" type="button">Activity</button>
-            <button class="mode-button" data-system-mode="maintenance" type="button">Maintenance</button>
           </div>
         </div>
 
@@ -673,37 +671,6 @@
           </div>
         </div>
 
-        <div class="mode-section" data-system-section="maintenance">
-          <div class="troubleshoot-grid">
-            <section class="troubleshoot-card">
-              <h3>Latest Rename Run</h3>
-              <div id="troubleshoot-summary" class="troubleshoot-copy">No template selected.</div>
-            </section>
-            <section class="troubleshoot-card">
-              <h3>System</h3>
-              <div id="app-info-panel" class="troubleshoot-copy">Loading app info.</div>
-              <div class="detail-actions">
-                <button id="clear-unused-cache-button" class="secondary" type="button">Clear Unused Cache</button>
-              </div>
-              <div id="cache-cleanup-result" class="troubleshoot-copy muted">No cache cleanup run yet.</div>
-            </section>
-            <section class="troubleshoot-card">
-              <h3>Rollback Results</h3>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Photo</th>
-                      <th>Status</th>
-                      <th>Detail</th>
-                    </tr>
-                  </thead>
-                  <tbody id="rollback-results-table"></tbody>
-                </table>
-              </div>
-            </section>
-          </div>
-        </div>
       </section>
       </main>
     </div>
