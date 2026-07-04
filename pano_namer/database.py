@@ -84,6 +84,10 @@ CREATE TABLE IF NOT EXISTS photos (
     proposed_filename TEXT,
     applied INTEGER NOT NULL DEFAULT 0,
     content_hash TEXT,
+    is_panorama INTEGER,
+    smart_original_name TEXT,
+    upload_status TEXT,
+    uploaded_at TEXT,
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -557,6 +561,21 @@ def _migrate_area_sync_uid(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE areas ADD COLUMN sync_uid TEXT")
 
 
+def _migrate_smart_mode(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "photos")
+    if "is_panorama" not in columns:
+        conn.execute("ALTER TABLE photos ADD COLUMN is_panorama INTEGER")
+    if "smart_original_name" not in columns:
+        conn.execute("ALTER TABLE photos ADD COLUMN smart_original_name TEXT")
+    if "upload_status" not in columns:
+        conn.execute("ALTER TABLE photos ADD COLUMN upload_status TEXT")
+    if "uploaded_at" not in columns:
+        conn.execute("ALTER TABLE photos ADD COLUMN uploaded_at TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_photos_project_upload_status ON photos(project_id, upload_status)"
+    )
+
+
 def _migrate_overlay_display_name(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "overlays")
     if "display_name" not in columns:
@@ -590,6 +609,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     ("20260702_0009_app_settings", _migrate_app_settings),
     ("20260702_0010_area_sync_uid", _migrate_area_sync_uid),
     ("20260703_0011_overlay_display_name", _migrate_overlay_display_name),
+    ("20260703_0012_smart_mode", _migrate_smart_mode),
 )
 
 

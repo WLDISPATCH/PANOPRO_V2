@@ -32,8 +32,11 @@ class FakeSupabase:
         params = dict(urllib.parse.parse_qsl(parsed.query))
         if "/rest/v1/shared_areas" in parsed.path:
             if method == "GET":
-                template = params.get("template_name", "eq.").removeprefix("eq.")
-                rows = [r for r in self.rows.values() if r["template_name"] == template]
+                if "template_name" in params:
+                    template = params["template_name"].removeprefix("eq.")
+                    rows = [r for r in self.rows.values() if r["template_name"] == template]
+                else:
+                    rows = list(self.rows.values())
                 return 200, json.dumps(rows).encode("utf-8")
             if method == "POST":
                 for row in json.loads(body or b"[]"):
@@ -64,7 +67,7 @@ PROJECTED_SQUARE_WKT = (
 class Machine:
     """One simulated PanoPro install: its own DB, storage dir, and project."""
 
-    def __init__(self, root: Path, name: str, template: str) -> None:
+    def __init__(self, root: Path, name: str, template: str | None) -> None:
         self.base_dir = root / name
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.config = AppConfig.load(self.base_dir)
@@ -73,13 +76,14 @@ class Machine:
         self.db.initialize()
         self.storage = StorageService(self.config)
         with self.db.connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO projects (id, name, storage_root, crs, created_at, updated_at)
-                VALUES (1, ?, ?, 'EPSG:26912', ?, ?)
-                """,
-                (template, str(self.base_dir), utc_now(), utc_now()),
-            )
+            if template is not None:
+                conn.execute(
+                    """
+                    INSERT INTO projects (id, name, storage_root, crs, created_at, updated_at)
+                    VALUES (1, ?, ?, 'EPSG:26912', ?, ?)
+                    """,
+                    (template, str(self.base_dir), utc_now(), utc_now()),
+                )
             save_settings(
                 conn,
                 SharedNamingSettings(
@@ -264,6 +268,114 @@ class AreaSyncTests(unittest.TestCase):
             summary = self.machine_a.sync()
         self.assertFalse(summary["ok"])
         self.assertIn("offline", summary["error"])
+
+
+class GlobalAreaSyncTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.fake = FakeSupabase()
+        self.machine_a = Machine(self.root, "A", "SiteX")
+        self.fresh = Machine(self.root, "FRESH", None)
+        patcher = patch.object(area_sync, "_request", side_effect=self.fake.request)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _settings(self, machine: Machine) -> SharedNamingSettings:
+        with machine.db.connect() as conn:
+            from pano_namer.services.shared_naming import load_settings
+
+            return load_settings(conn)
+
+    def test_fetch_remote_template_names_dedupes_and_skips_tombstones(self) -> None:
+        self.fake.rows = {
+            "u1": {"uid": "u1", "template_name": "SiteX", "deleted_at": None},
+            "u2": {"uid": "u2", "template_name": "sitex", "deleted_at": None},
+            "u3": {"uid": "u3", "template_name": "Gone", "deleted_at": utc_now()},
+            "u4": {"uid": "u4", "template_name": "SiteY", "deleted_at": None},
+        }
+        names = area_sync.fetch_remote_template_names(self._settings(self.fresh))
+        self.assertEqual(names, ["SiteX", "SiteY"])
+
+    def test_ensure_project_reuses_case_insensitive_match(self) -> None:
+        with self.machine_a.db.connect() as conn:
+            project_id, created = area_sync._ensure_project(
+                conn, self.machine_a.storage, "SITEX"
+            )
+        self.assertEqual(project_id, 1)
+        self.assertFalse(created)
+
+    def test_ensure_project_creates_missing_project(self) -> None:
+        with self.fresh.db.connect() as conn:
+            project_id, created = area_sync._ensure_project(
+                conn, self.fresh.storage, "SiteZ"
+            )
+            row = conn.execute(
+                "SELECT * FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        self.assertTrue(created)
+        self.assertEqual(row["name"], "SiteZ")
+        self.assertEqual(row["crs"], "EPSG:26912")
+
+    def test_fresh_machine_bootstraps_templates_and_areas(self) -> None:
+        self.machine_a.add_drawn_area("OPTA")
+        self.machine_a.sync()
+
+        summary = area_sync.run_global_area_sync(self.fresh.db, self.fresh.storage, None)
+        self.assertTrue(summary["ok"], summary)
+        self.assertEqual(summary["templates_created"], 1)
+        self.assertEqual(summary["created_names"], ["SiteX"])
+        self.assertEqual(summary["templates_synced"], 1)
+        self.assertEqual(summary["pulled_new"], 1)
+
+        with self.fresh.db.connect() as conn:
+            project = conn.execute(
+                "SELECT * FROM projects WHERE name = 'SiteX'"
+            ).fetchone()
+            self.assertIsNotNone(project)
+            areas = conn.execute(
+                "SELECT * FROM areas WHERE project_id = ?", (project["id"],)
+            ).fetchall()
+        self.assertEqual(len(areas), 1)
+        self.assertEqual(areas[0]["name"], "OPTA")
+        self.assertTrue(areas[0]["active"])
+
+    def test_selected_local_only_project_gets_pushed(self) -> None:
+        self.machine_a.add_drawn_area("OPTA")
+        summary = area_sync.run_global_area_sync(
+            self.machine_a.db, self.machine_a.storage, 1
+        )
+        self.assertTrue(summary["ok"], summary)
+        self.assertEqual(summary["templates_created"], 0)
+        self.assertEqual(summary["pushed_new"], 1)
+        self.assertEqual(len(self.fake.rows), 1)
+
+    def test_unselected_local_only_project_is_not_pushed(self) -> None:
+        self.machine_a.add_drawn_area("OPTA")
+        summary = area_sync.run_global_area_sync(
+            self.machine_a.db, self.machine_a.storage, None
+        )
+        self.assertTrue(summary["ok"], summary)
+        self.assertEqual(summary["templates_synced"], 0)
+        self.assertEqual(len(self.fake.rows), 0)
+
+    def test_disabled_sync_reports_not_enabled(self) -> None:
+        with self.fresh.db.connect() as conn:
+            save_settings(
+                conn,
+                SharedNamingSettings(
+                    supabase_url="https://fake.supabase.co",
+                    supabase_anon_key="anon",
+                    sync_areas=False,
+                ),
+            )
+            conn.commit()
+        summary = area_sync.run_global_area_sync(self.fresh.db, self.fresh.storage, None)
+        self.assertFalse(summary["ok"])
+        self.assertIn("not enabled", summary["error"])
 
 
 if __name__ == "__main__":

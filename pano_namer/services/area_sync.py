@@ -492,3 +492,120 @@ def refresh_pending_photo_matches(conn: sqlite3.Connection, project_id: int) -> 
     )
 
     _refresh(conn, project_id)
+
+
+# ---- Global sync: bootstrap every template found on the network ----
+
+
+def fetch_remote_template_names(settings: SharedNamingSettings) -> list[str]:
+    """Distinct template names on the network, skipping fully-deleted templates."""
+    status, body = _request(
+        "GET",
+        _table_url(settings, {"select": "template_name,deleted_at"}),
+        _headers(settings),
+        None,
+    )
+    if status != 200:
+        raise SharedNamingUnavailableError(
+            f"Supabase area registry lookup failed with HTTP {status}."
+        )
+    rows = json.loads(body or b"[]")
+    live_by_key: dict[str, str] = {}
+    for row in rows:
+        name = (row.get("template_name") or "").strip()
+        if not name or row.get("deleted_at"):
+            continue
+        live_by_key.setdefault(name.lower(), name)
+    return sorted(live_by_key.values(), key=str.lower)
+
+
+def _ensure_project(conn: sqlite3.Connection, storage, template_name: str) -> tuple[int, bool]:
+    """Find a project by name (case-insensitive) or create it like POST /api/projects."""
+    row = conn.execute(
+        "SELECT id FROM projects WHERE name = ? COLLATE NOCASE",
+        (template_name,),
+    ).fetchone()
+    if row is not None:
+        return int(row["id"]), False
+    now = utc_now()
+    storage_root = str(storage.config.storage_dir / "projects")
+    cursor = conn.execute(
+        "INSERT INTO projects (name, storage_root, crs, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (template_name.strip(), storage_root, FIXED_CRS, now, now),
+    )
+    project_id = cursor.lastrowid
+    conn.commit()
+    storage.project_dir(project_id)
+    return int(project_id), True
+
+
+_SYNC_COUNTER_KEYS = (
+    "pulled_new",
+    "pulled_updated",
+    "pushed_new",
+    "pushed_updated",
+    "deactivated",
+    "tombstoned",
+    "skipped",
+)
+
+
+def run_global_area_sync(db, storage, selected_project_id: int | None = None) -> dict[str, Any]:
+    """Sync every template known to the network, creating missing ones locally.
+
+    Remote-known templates get a full two-way sync. The currently selected
+    project is also synced (publishing it to the network) when its name is not
+    on the network yet; other local-only templates are never pushed implicitly.
+    """
+    summary: dict[str, Any] = {
+        "ok": True,
+        "error": None,
+        "templates_created": 0,
+        "created_names": [],
+        "templates_synced": 0,
+        "errors": [],
+    }
+    summary.update({key: 0 for key in _SYNC_COUNTER_KEYS})
+
+    with db.connect() as conn:
+        settings = load_settings(conn)
+        if not settings.sync_areas or not settings.is_configured():
+            summary.update(ok=False, error="Area sync is not enabled or configured.")
+            return summary
+        try:
+            remote_names = fetch_remote_template_names(settings)
+        except SharedNamingUnavailableError as exc:
+            summary.update(ok=False, error=str(exc))
+            return summary
+
+        project_ids: list[int] = []
+        remote_keys = {name.lower() for name in remote_names}
+        for template_name in remote_names:
+            try:
+                project_id, created = _ensure_project(conn, storage, template_name)
+            except Exception as exc:  # pragma: no cover - defensive
+                summary["errors"].append(
+                    f"Could not create template '{template_name}': {exc}"
+                )
+                continue
+            if created:
+                summary["templates_created"] += 1
+                summary["created_names"].append(template_name)
+            project_ids.append(project_id)
+
+        if selected_project_id is not None:
+            selected = conn.execute(
+                "SELECT id, name FROM projects WHERE id = ?", (selected_project_id,)
+            ).fetchone()
+            if selected is not None and selected["name"].lower() not in remote_keys:
+                project_ids.append(int(selected["id"]))
+
+    for project_id in project_ids:
+        result = run_area_sync(db, storage, project_id)
+        summary["templates_synced"] += 1
+        for key in _SYNC_COUNTER_KEYS:
+            summary[key] += int(result.get(key, 0))
+        if not result.get("ok") and result.get("error"):
+            summary["errors"].append(str(result["error"]))
+
+    return summary

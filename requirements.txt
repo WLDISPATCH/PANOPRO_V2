@@ -14,3 +14,4 @@ pyinstaller==6.15.0; platform_system == "Windows"
 sqladmin
 sqlalchemy
 passlib[bcrypt]
+paramiko==3.5.1

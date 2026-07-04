@@ -1778,7 +1778,7 @@ button:disabled:hover {
   inset: 0;
   display: grid;
   place-items: center;
-  z-index: 120;
+  z-index: 1000;
 }
 
 .app-modal[hidden] {
@@ -1931,6 +1931,10 @@ button:disabled:hover {
   width: 100%;
   height: 100%;
   border-radius: 18px;
+  /* Trap Leaflet's internal pane z-indexes (up to ~700) in their own
+     stacking context so map labels can't paint over app modals. */
+  position: relative;
+  z-index: 0;
 }
 
 .leaflet-container {
@@ -2435,4 +2439,125 @@ body.is-modal-open {
   .topbar-title {
     align-items: flex-start;
   }
+}
+
+/* ================= Smart Mode ================= */
+
+.sidebar-mode-toggle {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.mode-toggle-pill {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.mode-toggle-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+body.smart-mode .mode-toggle-pill {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+body.smart-mode .tab:not([data-tab="review"]) {
+  display: none;
+}
+
+body.smart-mode #draw-area-button {
+  display: none;
+}
+
+.smart-actionbar {
+  display: none;
+  gap: 10px;
+  align-items: center;
+}
+
+body.smart-mode .smart-actionbar {
+  display: flex;
+}
+
+.smart-actionbar button {
+  padding: 12px 22px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.smart-progress-steps {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.smart-progress-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.smart-progress-steps li::before {
+  content: "○";
+  color: var(--line);
+}
+
+.smart-progress-steps li.active {
+  color: var(--ink);
+}
+
+.smart-progress-steps li.active::before {
+  content: "◐";
+  color: var(--accent);
+}
+
+.smart-progress-steps li.done {
+  color: var(--ink);
+}
+
+.smart-progress-steps li.done::before {
+  content: "●";
+  color: var(--accent);
+}
+
+.smart-progress-steps li.error {
+  color: var(--danger);
+}
+
+.smart-progress-steps li.error::before {
+  content: "✕";
+  color: var(--danger);
+}
+
+/* System panel content exceeds the viewport (settings cards, audit table);
+   let its sections scroll like .panel-stack does for Setup. */
+[data-panel="system"] .mode-section.active {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.settings-subhead {
+  margin: 8px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }

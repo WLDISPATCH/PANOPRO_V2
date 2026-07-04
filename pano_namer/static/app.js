@@ -33,6 +33,8 @@ const state = {
   leaflet: null,
   mapDataVersion: 0,
   sharedNamingSettings: null,
+  smartSettings: null,
+  smartBusy: false,
   areaSyncInFlight: false,
   areaSyncRefreshing: false,
   collectionMapTransform: null,
@@ -46,7 +48,6 @@ const state = {
   viewerContext: { source: "viewer", collectionId: null },
   viewerPose: null,
   viewerDrag: null,
-  reviewIndex: 0,
   pendingView: {
     sortBy: "date_desc",
     search: "",
@@ -106,6 +107,29 @@ const elements = {
   sharedNamingSyncAreas: document.getElementById("shared-naming-sync-areas"),
   areaSyncNowButton: document.getElementById("area-sync-now-button"),
   areaSyncResult: document.getElementById("area-sync-result"),
+  modeToggleButton: document.getElementById("mode-toggle-button"),
+  smartActionbar: document.getElementById("smart-actionbar"),
+  smartImportButton: document.getElementById("smart-import-button"),
+  smartExportButton: document.getElementById("smart-export-button"),
+  reviewEyebrow: document.getElementById("review-eyebrow"),
+  reviewTitle: document.getElementById("review-title"),
+  reviewDescription: document.getElementById("review-description"),
+  smartImportBase: document.getElementById("smart-import-base"),
+  smartArchiveBase: document.getElementById("smart-archive-base"),
+  smartFtpHost: document.getElementById("smart-ftp-host"),
+  smartFtpPort: document.getElementById("smart-ftp-port"),
+  smartFtpUsername: document.getElementById("smart-ftp-username"),
+  smartFtpPassword: document.getElementById("smart-ftp-password"),
+  smartFtpRemotePath: document.getElementById("smart-ftp-remote-path"),
+  smartFtpProtocol: document.getElementById("smart-ftp-protocol"),
+  smartSettingsSaveButton: document.getElementById("smart-settings-save-button"),
+  smartFtpTestButton: document.getElementById("smart-ftp-test-button"),
+  smartSettingsStatus: document.getElementById("smart-settings-status"),
+  smartProgressModal: document.getElementById("smart-progress-modal"),
+  smartProgressTitle: document.getElementById("smart-progress-title"),
+  smartProgressSummary: document.getElementById("smart-progress-summary"),
+  smartProgressSteps: document.getElementById("smart-progress-steps"),
+  smartProgressCloseButton: document.getElementById("smart-progress-close-button"),
   appVersionBadge: document.getElementById("app-version-badge"),
   statusPill: document.getElementById("status-pill"),
   tabs: [...document.querySelectorAll(".tab")],
@@ -131,7 +155,6 @@ const elements = {
   photosHeaderRow: document.getElementById("photos-header-row"),
   importPhotosButton: document.getElementById("import-photos-button"),
   importFolderButton: document.getElementById("import-folder-button"),
-  photoSort: document.getElementById("photo-sort"),
   pendingShowOriginalToggle: document.getElementById("pending-show-original-toggle"),
   pendingShowDateToggle: document.getElementById("pending-show-date-toggle"),
   pendingShowProposedToggle: document.getElementById("pending-show-proposed-toggle"),
@@ -172,7 +195,6 @@ const elements = {
   viewerDetailsBody: document.getElementById("viewer-details-body"),
   viewerDetailStatus: document.getElementById("viewer-detail-status"),
   viewerOpenMapButton: document.getElementById("viewer-open-map-button"),
-  viewerOpenReviewButton: document.getElementById("viewer-open-review-button"),
   viewerFullscreenButton: document.getElementById("viewer-fullscreen-button"),
   viewerPrevButton: document.getElementById("viewer-prev-button"),
   viewerNextButton: document.getElementById("viewer-next-button"),
@@ -201,14 +223,6 @@ const elements = {
   addHotspotButton: document.getElementById("add-hotspot-button"),
   viewerHotspotsList: document.getElementById("viewer-hotspots-list"),
   viewerHotspotsBadge: document.getElementById("viewer-hotspots-badge"),
-  reviewMarkButton: document.getElementById("review-mark-button"),
-  reviewArchiveButton: document.getElementById("review-archive-button"),
-  reviewAddToCollectionButton: document.getElementById("review-add-to-collection-button"),
-  reviewViewerCanvas: document.getElementById("review-viewer-canvas"),
-  reviewViewerOverlay: document.getElementById("review-viewer-overlay"),
-  reviewPrevButton: document.getElementById("review-prev-button"),
-  reviewNextButton: document.getElementById("review-next-button"),
-  reviewQueueList: document.getElementById("review-queue-list"),
   auditTable: document.getElementById("audit-table"),
   dropzone: document.getElementById("dropzone"),
   mapCanvas: document.getElementById("map-canvas"),
@@ -513,7 +527,7 @@ function customSelectNodes(select) {
 }
 
 function closeCustomSelect(selectId = null) {
-  const targets = [elements.projectSelect, elements.photoFilter, elements.photoSort];
+  const targets = [elements.projectSelect, elements.photoFilter];
   for (const select of targets) {
     const id = select.dataset.customSelectId;
     if (selectId && id !== selectId) continue;
@@ -626,7 +640,6 @@ const TAB_ROUTES = {
   map: { tab: "review", mode: "map" },
   viewer: { tab: "review", mode: "viewer" },
   review: { tab: "review" },
-  "bulk-review": { tab: "review", mode: "bulk" },
   library: { tab: "library" },
   archive: { tab: "library", mode: "archive" },
   collections: { tab: "library", mode: "collections" },
@@ -921,6 +934,38 @@ async function maybeRunAreaSync(projectId) {
   }
 }
 
+// New-computer bootstrap: with no local templates, pull everything the
+// network knows about (templates are auto-created server-side) so a fresh
+// session starts with the same parameters as everyone else.
+async function maybeBootstrapFromNetwork() {
+  if (state.projects.length || state.areaSyncInFlight) return;
+  state.areaSyncInFlight = true;
+  try {
+    if (!state.sharedNamingSettings) {
+      state.sharedNamingSettings = await api("/api/settings/shared-naming");
+    }
+    const settings = state.sharedNamingSettings;
+    if (!settings.sync_areas || !settings.supabase_url || !settings.supabase_anon_key) return;
+    setStatus("Checking the shared network for templates…");
+    const summary = await api("/api/area-sync/run", {
+      method: "POST",
+      body: JSON.stringify({ project_id: null }),
+      timeoutMs: 120000,
+    });
+    reportAreaSync(summary);
+    if (summary.ok && summary.templates_created > 0) {
+      state.areaSyncInFlight = false;
+      await loadProjects();
+    }
+  } catch (error) {
+    if (elements.areaSyncResult) {
+      elements.areaSyncResult.textContent = `Network bootstrap failed: ${error.message}`;
+    }
+  } finally {
+    state.areaSyncInFlight = false;
+  }
+}
+
 function reportAreaSync(summary) {
   if (!elements.areaSyncResult) return;
   if (!summary.ok) {
@@ -928,6 +973,9 @@ function reportAreaSync(summary) {
     return;
   }
   const parts = [];
+  if (summary.templates_created) {
+    parts.push(`${summary.templates_created} template${summary.templates_created === 1 ? "" : "s"} created (${(summary.created_names || []).join(", ")})`);
+  }
   if (summary.pulled_new) parts.push(`${summary.pulled_new} pulled`);
   if (summary.pulled_updated) parts.push(`${summary.pulled_updated} updated`);
   if (summary.pushed_new) parts.push(`${summary.pushed_new} pushed`);
@@ -935,9 +983,11 @@ function reportAreaSync(summary) {
   if (summary.deactivated) parts.push(`${summary.deactivated} removed`);
   if (summary.tombstoned) parts.push(`${summary.tombstoned} deletions pushed`);
   if (summary.skipped) parts.push(`${summary.skipped} skipped`);
-  elements.areaSyncResult.textContent = parts.length
-    ? `Areas synced: ${parts.join(", ")}.`
-    : "Areas are in sync.";
+  let text = parts.length ? `Areas synced: ${parts.join(", ")}.` : "Areas are in sync.";
+  if (summary.errors && summary.errors.length) {
+    text += ` Problems: ${summary.errors.join(" ")}`;
+  }
+  elements.areaSyncResult.textContent = text;
   if (parts.length) {
     setStatus(`Areas synced: ${parts.join(", ")}.`);
   }
@@ -993,7 +1043,6 @@ function renderAll() {
   renderArchive();
   renderCollections();
   renderViewer();
-  renderReview();
   renderRuns();
   renderAudit();
   renderTroubleshoot();
@@ -1476,9 +1525,6 @@ function viewerSequence() {
   if (state.viewerContext.source === "collection" && state.collectionDetail?.photos?.length) {
     return state.collectionDetail.photos;
   }
-  if (state.viewerContext.source === "review") {
-    return reviewQueue();
-  }
   if (state.viewerContext.source === "archive") {
     return state.currentArchiveFolderId == null
       ? state.archivePhotos.filter((photo) => photo.archive_folder_id == null)
@@ -1729,7 +1775,6 @@ function renderViewer() {
     elements.viewerOpenFolderButton.disabled = true;
     elements.viewerRevealButton.disabled = true;
     elements.viewerOpenMapButton.disabled = true;
-    elements.viewerOpenReviewButton.disabled = true;
     elements.saveViewerStateButton.disabled = true;
     if (elements.viewerFullscreenButton) {
       elements.viewerFullscreenButton.disabled = true;
@@ -1750,7 +1795,6 @@ function renderViewer() {
   elements.viewerOpenFolderButton.disabled = false;
   elements.viewerRevealButton.disabled = false;
   elements.viewerOpenMapButton.disabled = false;
-  elements.viewerOpenReviewButton.disabled = false;
   elements.saveViewerStateButton.disabled = false;
   if (elements.viewerFullscreenButton) {
     elements.viewerFullscreenButton.disabled = false;
@@ -1764,29 +1808,6 @@ function renderCollectionViewer() {
     return;
   }
   renderPanoCanvas(elements.collectionViewerCanvas, elements.collectionViewerOverlay, state.viewerPayload);
-}
-
-function reviewQueue() {
-  return state.archivePhotos.filter((photo) => photo.archive_folder_id != null);
-}
-
-function renderReview() {
-  const queue = reviewQueue();
-  elements.reviewQueueList.innerHTML = queue.map((photo, index) => `
-    <button class="stack-item ${index === state.reviewIndex ? "is-active" : ""}" type="button" data-review-index="${index}">
-      ${baseName(photo.original_path)}
-    </button>
-  `).join("") || `<div class="muted">No archived panos ready for review.</div>`;
-  const current = queue[state.reviewIndex] || null;
-  if (!current || !state.viewerPayload || state.viewerPayload.photo.id !== current.id || state.viewerContext.source !== "review") {
-    clearViewerCanvas(elements.reviewViewerCanvas, elements.reviewViewerOverlay, "Choose a pano from the review queue.");
-    elements.reviewPrevButton.disabled = true;
-    elements.reviewNextButton.disabled = true;
-    return;
-  }
-  renderPanoCanvas(elements.reviewViewerCanvas, elements.reviewViewerOverlay, state.viewerPayload);
-  elements.reviewPrevButton.disabled = state.reviewIndex <= 0;
-  elements.reviewNextButton.disabled = state.reviewIndex >= queue.length - 1;
 }
 
 function renderAudit() {
@@ -2296,7 +2317,6 @@ function renderMapSelectedDetail(selectedPhoto) {
     </div>
     <div class="detail-actions map-detail-actions">
       ${selectedPhoto.applied ? `<button data-map-action="open-viewer" type="button">Open Viewer</button>` : ""}
-      ${isArchived ? `<button data-map-action="open-review" class="secondary" type="button">Open Review</button>` : ""}
       <button data-map-action="open-source" class="secondary" type="button">Open ${selectedPhoto.applied ? "Processed" : "Pending"}</button>
       ${selectedPhoto.applied ? "" : `<button data-map-action="remove-photo" class="secondary danger" type="button">Remove Photo</button>`}
     </div>
@@ -2714,20 +2734,6 @@ function handleRunsClick(event) {
   setTab("troubleshoot");
 }
 
-function handleReviewClick(event) {
-  const queueButton = event.target.closest("[data-review-index]");
-  if (queueButton) {
-    state.reviewIndex = Number(queueButton.dataset.reviewIndex);
-    const queue = reviewQueue();
-    const current = queue[state.reviewIndex];
-    if (current) {
-      loadViewer(current.id, "review", state.currentCollectionId).catch((error) => setStatus(error.message, true));
-    } else {
-      renderReview();
-    }
-  }
-}
-
 async function createProject(event) {
   event.preventDefault();
   const name = elements.projectName.value.trim();
@@ -3004,18 +3010,16 @@ async function saveSharedNamingSettings() {
 
 async function runAreaSyncNow() {
   await saveSharedNamingSettings();
-  if (!state.currentProjectId) {
-    setStatus("Select a template before syncing areas.", true);
-    return;
-  }
   elements.areaSyncResult.textContent = "Syncing areas...";
-  const summary = await api(`/api/projects/${state.currentProjectId}/area-sync/run`, {
+  const summary = await api("/api/area-sync/run", {
     method: "POST",
-    body: JSON.stringify({}),
-    timeoutMs: 60000,
+    body: JSON.stringify({ project_id: state.currentProjectId }),
+    timeoutMs: 120000,
   });
   reportAreaSync(summary);
-  if (summary.ok && (summary.pulled_new + summary.pulled_updated + summary.deactivated) > 0) {
+  const pulledChanges = summary.pulled_new + summary.pulled_updated + summary.deactivated > 0;
+  if (summary.ok && (summary.templates_created > 0 || pulledChanges)) {
+    await loadProjects();
     await refreshProjectData();
   }
 }
@@ -3063,6 +3067,208 @@ function maybeLoadSettingsForTab(tabName) {
   loadSharedNamingSettings().catch((error) => {
     elements.sharedNamingStatus.textContent = error.message;
   });
+  loadSmartSettings().catch((error) => {
+    elements.smartSettingsStatus.textContent = error.message;
+  });
+}
+
+function smartSettingsStatusText(settings) {
+  const missing = [];
+  if (!settings.import_base_path) missing.push("import folder");
+  if (!settings.archive_base_path) missing.push("archive folder");
+  if (!settings.ftp_host || !settings.ftp_username) missing.push("FTP server");
+  if (!missing.length) return "Smart Mode is fully configured.";
+  return `Smart Mode needs: ${missing.join(", ")}.`;
+}
+
+function applyUiMode(mode) {
+  const smart = mode === "smart";
+  document.body.classList.toggle("smart-mode", smart);
+  const reviewTab = elements.tabs.find((tab) => tab.dataset.tab === "review");
+  if (reviewTab) reviewTab.textContent = smart ? "Smart View" : "Review";
+  elements.reviewEyebrow.textContent = smart ? "Smart Mode" : "Review Workspace";
+  elements.reviewTitle.textContent = smart ? "Smart View" : "Review";
+  elements.reviewDescription.textContent = smart
+    ? "Insert the SD card and press Smart Import. Smart Export renames, uploads, and archives."
+    : "One workspace for spatial review and 360 inspection.";
+  elements.modeToggleButton.textContent = smart ? "Switch to Advanced" : "Switch to Smart Mode";
+  if (smart) {
+    setTab("map");
+    maybeRefreshMapForTab("map");
+  }
+}
+
+async function loadSmartSettings() {
+  const settings = await api("/api/smart/settings");
+  state.smartSettings = settings;
+  elements.smartImportBase.value = settings.import_base_path || "";
+  elements.smartArchiveBase.value = settings.archive_base_path || "";
+  elements.smartFtpHost.value = settings.ftp_host || "";
+  elements.smartFtpPort.value = settings.ftp_port > 0 ? settings.ftp_port : "";
+  elements.smartFtpUsername.value = settings.ftp_username || "";
+  elements.smartFtpPassword.value = settings.ftp_password || "";
+  elements.smartFtpRemotePath.value = settings.ftp_remote_path || "";
+  elements.smartFtpProtocol.value = settings.ftp_protocol || "ftp";
+  elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
+  applyUiMode(settings.ui_mode);
+}
+
+async function saveSmartSettings() {
+  const settings = await api("/api/smart/settings", {
+    method: "PUT",
+    body: JSON.stringify({
+      import_base_path: elements.smartImportBase.value.trim(),
+      archive_base_path: elements.smartArchiveBase.value.trim(),
+      ftp_host: elements.smartFtpHost.value.trim(),
+      ftp_port: Number(elements.smartFtpPort.value) || 0,
+      ftp_username: elements.smartFtpUsername.value.trim(),
+      ftp_password: elements.smartFtpPassword.value,
+      ftp_remote_path: elements.smartFtpRemotePath.value.trim(),
+      ftp_protocol: elements.smartFtpProtocol.value,
+    }),
+  });
+  state.smartSettings = settings;
+  elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
+  setStatus("Smart Mode settings saved.");
+}
+
+async function toggleUiMode() {
+  const current = state.smartSettings?.ui_mode || "advanced";
+  const next = current === "smart" ? "advanced" : "smart";
+  const settings = await api("/api/smart/settings", {
+    method: "PUT",
+    body: JSON.stringify({ ui_mode: next }),
+  });
+  state.smartSettings = settings;
+  applyUiMode(settings.ui_mode);
+}
+
+async function testSmartFtp() {
+  await saveSmartSettings();
+  elements.smartSettingsStatus.textContent = "Testing FTP connection...";
+  const result = await api("/api/smart/ftp-test", {
+    method: "POST",
+    body: JSON.stringify({}),
+    timeoutMs: 60000,
+  });
+  if (result.ok) {
+    elements.smartSettingsStatus.textContent = "FTP connection succeeded.";
+    setStatus("FTP connection succeeded.");
+  } else {
+    elements.smartSettingsStatus.textContent = result.error || "FTP connection failed.";
+    setStatus(result.error || "FTP connection failed.", true);
+  }
+}
+
+function openSmartProgress(title, steps) {
+  elements.smartProgressTitle.textContent = title;
+  elements.smartProgressSummary.textContent = "Working…";
+  elements.smartProgressSteps.innerHTML = "";
+  steps.forEach((label, index) => {
+    const item = document.createElement("li");
+    item.textContent = label;
+    if (index === 0) item.classList.add("active");
+    elements.smartProgressSteps.appendChild(item);
+  });
+  elements.smartProgressCloseButton.disabled = true;
+  elements.smartProgressModal.hidden = false;
+}
+
+function finishSmartProgress(summaryText, failed) {
+  [...elements.smartProgressSteps.children].forEach((item) => {
+    item.classList.remove("active");
+    item.classList.add(failed ? "error" : "done");
+  });
+  elements.smartProgressSummary.textContent = summaryText;
+  elements.smartProgressCloseButton.disabled = false;
+}
+
+function smartGuardFail(title, message) {
+  openSmartProgress(title, []);
+  finishSmartProgress(message, true);
+  setStatus(message, true);
+}
+
+async function runSmartImport() {
+  if (!state.currentProjectId) {
+    smartGuardFail("Smart Import", "No template selected. Switch to Advanced mode and pick one under System → Settings.");
+    return;
+  }
+  if (state.smartBusy) return;
+  state.smartBusy = true;
+  openSmartProgress("Smart Import", [
+    "Find SD card",
+    "Scan for 360 panos",
+    "Check shared registry for duplicates",
+    "Copy new panos to dated folder",
+    "Stage panos on the map",
+  ]);
+  try {
+    const result = await api("/api/smart/import", {
+      method: "POST",
+      body: JSON.stringify({ project_id: state.currentProjectId }),
+      timeoutMs: 600000,
+    });
+    const parts = [
+      `Found ${result.panos_found} pano${result.panos_found === 1 ? "" : "s"} (${result.normal_skipped} other photos ignored).`,
+      `${result.duplicates_skipped} duplicate${result.duplicates_skipped === 1 ? "" : "s"} skipped.`,
+      `${result.copied} copied, ${result.staged} staged on the map.`,
+    ];
+    if (!result.registry_checked) {
+      parts.push("Shared registry was not checked (Supabase not configured).");
+    }
+    finishSmartProgress(parts.join(" "), false);
+    setStatus(`Smart Import complete. ${result.staged} pano${result.staged === 1 ? "" : "s"} staged.`);
+    await refreshProjectData();
+    setTab("map");
+  } catch (error) {
+    finishSmartProgress(error.message, true);
+    setStatus(error.message, true);
+  } finally {
+    state.smartBusy = false;
+  }
+}
+
+async function runSmartExport() {
+  if (!state.currentProjectId) {
+    smartGuardFail("Smart Export", "No template selected. Switch to Advanced mode and pick one under System → Settings.");
+    return;
+  }
+  if (state.smartBusy) return;
+  state.smartBusy = true;
+  openSmartProgress("Smart Export", [
+    "Rename staged panos",
+    "Register in shared registry",
+    "Upload to FTP",
+    "Archive locally",
+  ]);
+  try {
+    const result = await api("/api/smart/export", {
+      method: "POST",
+      body: JSON.stringify({ project_id: state.currentProjectId }),
+      timeoutMs: 600000,
+    });
+    const parts = [
+      `${result.renamed} renamed, ${result.registered} registered, ${result.uploaded} uploaded, ${result.archived} archived.`,
+    ];
+    if (result.failed) {
+      parts.push(`${result.failed} failed.`);
+    }
+    if (result.errors.length) {
+      parts.push(result.errors.slice(0, 5).join(" "));
+    }
+    finishSmartProgress(parts.join(" "), Boolean(result.failed || result.errors.length));
+    setStatus(
+      `Smart Export complete. ${result.uploaded} uploaded, ${result.archived} archived${result.failed ? `, ${result.failed} failed` : ""}.`,
+      Boolean(result.failed),
+    );
+    await refreshProjectData();
+  } catch (error) {
+    finishSmartProgress(error.message, true);
+    setStatus(error.message, true);
+  } finally {
+    state.smartBusy = false;
+  }
 }
 
 async function runRename() {
@@ -3213,15 +3419,8 @@ async function loadViewer(photoId, source = "viewer", collectionId = null) {
   const suffix = collectionId ? `?collection_id=${collectionId}` : "";
   state.viewerPayload = await api(`/api/photos/${photoId}/viewer${suffix}`, { timeoutMs: 30000 });
   applyViewerPose(state.viewerPayload.photo, currentViewerPose(state.viewerPayload.photo));
-  if (source === "review") {
-    const index = reviewQueue().findIndex((item) => item.id === Number(photoId));
-    if (index >= 0) {
-      state.reviewIndex = index;
-    }
-  }
   renderViewer();
   renderCollections();
-  renderReview();
   if (source === "viewer" || source === "archive") {
     setTab("viewer");
   }
@@ -3233,9 +3432,6 @@ async function stepViewer(delta, source = state.viewerContext.source) {
   if (index < 0) return;
   const next = sequence[index + delta];
   if (!next) return;
-  if (source === "review") {
-    state.reviewIndex = Math.max(0, Math.min(reviewQueue().length - 1, state.reviewIndex + delta));
-  }
   await loadViewer(next.id, source, state.viewerContext.collectionId);
 }
 
@@ -3366,20 +3562,6 @@ function openViewerPhotoOnMap() {
   focusPhotoOnMap(photo.id);
 }
 
-function openViewerPhotoInReview() {
-  const photo = viewerPhoto();
-  if (!photo) return;
-  const index = reviewQueue().findIndex((item) => item.id === photo.id);
-  setTab("bulk-review");
-  if (index >= 0) {
-    state.reviewIndex = index;
-    loadViewer(photo.id, "review", state.currentCollectionId).catch((error) => setStatus(error.message, true));
-    return;
-  }
-  renderReview();
-  setStatus("This pano is not in the bulk review queue yet.", true);
-}
-
 async function openSelectedViewerPath(mode) {
   const photo = viewerPhoto();
   if (!photo) return;
@@ -3394,55 +3576,9 @@ async function openSelectedViewerPath(mode) {
   await openDesktopPath(photo.original_path, "open");
 }
 
-async function updateReviewStatus(reviewed) {
-  const queue = reviewQueue();
-  const current = queue[state.reviewIndex];
-  if (!current) return;
-  await api(`/api/photos/${current.id}/review`, {
-    method: "PUT",
-    body: JSON.stringify({ reviewed }),
-  });
-  await refreshProjectData();
-  await loadViewer(current.id, "review", state.currentCollectionId);
-  setStatus(reviewed ? "Marked pano as reviewed." : "Marked pano as pending.");
-}
-
 async function exportCollection(kind) {
   if (!state.currentCollectionId) return;
   window.open(`/api/collections/${state.currentCollectionId}/report.${kind}`, "_blank");
-}
-
-async function archiveReviewPhoto() {
-  const queue = reviewQueue();
-  const current = queue[state.reviewIndex];
-  if (!current) return;
-  let folderId = state.currentArchiveFolderId;
-  if (folderId == null && state.archiveFolders.length) {
-    folderId = state.archiveFolders[0].id;
-  }
-  await api("/api/archive/assign", {
-    method: "POST",
-    body: JSON.stringify({ photo_ids: [current.id], folder_id: folderId }),
-  });
-  await refreshProjectData();
-  await loadViewer(current.id, "review", state.currentCollectionId);
-  setStatus("Updated archive folder for the current pano.");
-}
-
-async function addReviewPhotoToCollection() {
-  const queue = reviewQueue();
-  const current = queue[state.reviewIndex];
-  if (!current) return;
-  if (!state.currentCollectionId) {
-    throw new Error("Create or select a collection first.");
-  }
-  await api(`/api/collections/${state.currentCollectionId}/items`, {
-    method: "POST",
-    body: JSON.stringify({ photo_ids: [current.id] }),
-  });
-  await refreshProjectData();
-  await loadViewer(current.id, "review", state.currentCollectionId);
-  setStatus("Added current pano to the active collection.");
 }
 
 async function updatePhotoArea(photoId, areaId) {
@@ -3678,13 +3814,11 @@ function handleMapDetailFocusOut(event) {
 }
 
 function handlePendingViewChange() {
-  state.pendingView.sortBy = elements.photoSort.value;
   state.pendingView.search = elements.pendingSearch.value;
   state.pendingView.showOriginal = elements.pendingShowOriginalToggle.checked;
   state.pendingView.showDate = elements.pendingShowDateToggle.checked;
   state.pendingView.showProposed = elements.pendingShowProposedToggle.checked;
   syncCustomSelect(elements.photoFilter);
-  syncCustomSelect(elements.photoSort);
   renderPhotos();
 }
 
@@ -3701,11 +3835,6 @@ function handleMapDetailClick(event) {
     const action = mapAction.dataset.mapAction;
     if (action === "open-viewer") {
       loadViewer(selectedPhoto.id, "viewer", null).catch((error) => setStatus(error.message, true));
-      return;
-    }
-    if (action === "open-review") {
-      setTab("bulk-review");
-      loadViewer(selectedPhoto.id, "review", state.currentCollectionId).catch((error) => setStatus(error.message, true));
       return;
     }
     if (action === "open-source") {
@@ -3850,9 +3979,6 @@ function activeViewerPayloadForCanvas(canvas) {
   if (canvas === elements.collectionViewerCanvas && state.viewerContext.source === "collection") {
     return state.viewerPayload;
   }
-  if (canvas === elements.reviewViewerCanvas && state.viewerContext.source === "review") {
-    return state.viewerPayload;
-  }
   return null;
 }
 
@@ -3895,7 +4021,6 @@ function handleViewerPointerMove(event) {
   });
   renderViewer();
   renderCollectionViewer();
-  renderReview();
 }
 
 function stopViewerDrag(event) {
@@ -3928,18 +4053,6 @@ function handleViewerWheel(event) {
   });
   renderViewer();
   renderCollectionViewer();
-  renderReview();
-}
-
-function handleReviewClick(event) {
-  const queueButton = event.target.closest("[data-review-index]");
-  if (!queueButton) return;
-  const nextIndex = Number(queueButton.dataset.reviewIndex);
-  const queue = reviewQueue();
-  const next = queue[nextIndex];
-  if (!next) return;
-  state.reviewIndex = nextIndex;
-  loadViewer(next.id, "review", state.currentCollectionId).catch((error) => setStatus(error.message, true));
 }
 
 function handleDocumentClick(event) {
@@ -4002,7 +4115,6 @@ async function bootstrap() {
     setHoverSuppressed(false);
     ensureCustomSelect(elements.projectSelect);
     ensureCustomSelect(elements.photoFilter);
-    ensureCustomSelect(elements.photoSort);
     renderPendingHeader();
     handlePendingViewChange();
     handleMapVisibilityChange();
@@ -4013,7 +4125,13 @@ async function bootstrap() {
     } catch (_error) {
       state.appInfo = null;
     }
+    try {
+      await loadSmartSettings();
+    } catch (_error) {
+      state.smartSettings = null;
+    }
     await loadProjects();
+    await maybeBootstrapFromNetwork();
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -4104,6 +4222,24 @@ elements.sharedNamingBackfillButton.addEventListener("click", () => {
 elements.areaSyncNowButton.addEventListener("click", () => {
   runAreaSyncNow().catch((error) => setStatus(error.message, true));
 });
+elements.modeToggleButton.addEventListener("click", () => {
+  toggleUiMode().catch((error) => setStatus(error.message, true));
+});
+elements.smartImportButton.addEventListener("click", () => {
+  runSmartImport().catch((error) => setStatus(error.message, true));
+});
+elements.smartExportButton.addEventListener("click", () => {
+  runSmartExport().catch((error) => setStatus(error.message, true));
+});
+elements.smartSettingsSaveButton.addEventListener("click", () => {
+  saveSmartSettings().catch((error) => setStatus(error.message, true));
+});
+elements.smartFtpTestButton.addEventListener("click", () => {
+  testSmartFtp().catch((error) => setStatus(error.message, true));
+});
+elements.smartProgressCloseButton.addEventListener("click", () => {
+  elements.smartProgressModal.hidden = true;
+});
 elements.runsTable.addEventListener("click", handleRunsClick);
 elements.drawAreaButton.addEventListener("click", startDrawArea);
 elements.addAreaButton.addEventListener("click", () => {
@@ -4187,27 +4323,11 @@ elements.viewerRevealButton.addEventListener("click", () => {
   openSelectedViewerPath("reveal").catch((error) => setStatus(error.message, true));
 });
 elements.viewerOpenMapButton.addEventListener("click", openViewerPhotoOnMap);
-elements.viewerOpenReviewButton.addEventListener("click", openViewerPhotoInReview);
 elements.viewerPrevButton.addEventListener("click", () => {
   stepViewer(-1).catch((error) => setStatus(error.message, true));
 });
 elements.viewerNextButton.addEventListener("click", () => {
   stepViewer(1).catch((error) => setStatus(error.message, true));
-});
-elements.reviewPrevButton.addEventListener("click", () => {
-  stepViewer(-1, "review").catch((error) => setStatus(error.message, true));
-});
-elements.reviewNextButton.addEventListener("click", () => {
-  stepViewer(1, "review").catch((error) => setStatus(error.message, true));
-});
-elements.reviewMarkButton.addEventListener("click", () => {
-  updateReviewStatus(true).catch((error) => setStatus(error.message, true));
-});
-elements.reviewArchiveButton.addEventListener("click", () => {
-  archiveReviewPhoto().catch((error) => setStatus(error.message, true));
-});
-elements.reviewAddToCollectionButton.addEventListener("click", () => {
-  addReviewPhotoToCollection().catch((error) => setStatus(error.message, true));
 });
 elements.selectAllPendingButton.addEventListener("click", () => {
   selectAllRows(filteredPhotos());
@@ -4226,7 +4346,6 @@ elements.photoFilter.addEventListener("change", () => {
   renderPhotos();
 });
 elements.pendingSearch.addEventListener("input", handlePendingViewChange);
-elements.photoSort.addEventListener("change", handlePendingViewChange);
 elements.pendingShowOriginalToggle.addEventListener("change", handlePendingViewChange);
 elements.pendingShowDateToggle.addEventListener("change", handlePendingViewChange);
 elements.pendingShowProposedToggle.addEventListener("change", handlePendingViewChange);
@@ -4245,12 +4364,9 @@ elements.collectionPhotosTable.addEventListener("click", handleCollectionsClick)
 elements.collectionMapSvg.addEventListener("click", handleCollectionsClick);
 elements.viewerOverlay.addEventListener("click", handleViewerOverlayClick);
 elements.collectionViewerOverlay.addEventListener("click", handleViewerOverlayClick);
-elements.reviewViewerOverlay.addEventListener("click", handleViewerOverlayClick);
-elements.reviewQueueList.addEventListener("click", handleReviewClick);
 [
   elements.viewerCanvas,
   elements.collectionViewerCanvas,
-  elements.reviewViewerCanvas,
 ].forEach((canvas) => {
   canvas.addEventListener("pointerdown", handleViewerPointerDown);
   canvas.addEventListener("wheel", handleViewerWheel, { passive: false });
