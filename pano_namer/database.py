@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS overlays (
     bounds_json TEXT,
     width INTEGER,
     height INTEGER,
+    pmtiles_path TEXT,
+    tile_anchor_zoom INTEGER,
+    tile_anchor_x INTEGER,
+    tile_anchor_y INTEGER,
+    tile_max_zoom INTEGER,
     active INTEGER NOT NULL DEFAULT 1,
     error TEXT,
     created_at TEXT NOT NULL,
@@ -615,6 +620,19 @@ def _migrate_purge_orphaned_photo_rows(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_overlay_tiles(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "overlays")
+    for column, column_type in (
+        ("pmtiles_path", "TEXT"),
+        ("tile_anchor_zoom", "INTEGER"),
+        ("tile_anchor_x", "INTEGER"),
+        ("tile_anchor_y", "INTEGER"),
+        ("tile_max_zoom", "INTEGER"),
+    ):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE overlays ADD COLUMN {column} {column_type}")
+
+
 def _migrate_overlay_display_name(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "overlays")
     if "display_name" not in columns:
@@ -650,6 +668,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     ("20260703_0011_overlay_display_name", _migrate_overlay_display_name),
     ("20260703_0012_smart_mode", _migrate_smart_mode),
     ("20260704_0013_purge_orphaned_photo_rows", _migrate_purge_orphaned_photo_rows),
+    ("20260704_0014_overlay_tiles", _migrate_overlay_tiles),
 )
 
 

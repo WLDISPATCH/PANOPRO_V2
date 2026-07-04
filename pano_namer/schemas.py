@@ -156,6 +156,9 @@ class OverlayResponse(BaseModel):
     jpg_original_path: str
     jpg_managed_path: str
     image_url: str | None = None
+    tile_url: str | None = None
+    tile_min_zoom: int | None = None
+    tile_max_zoom: int | None = None
     crs: str | None
     bounds: list[float] | None
     width: int | None

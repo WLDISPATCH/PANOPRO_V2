@@ -16,3 +16,4 @@ sqlalchemy
 passlib[bcrypt]
 paramiko==3.5.1
 httpx==0.28.1
+pmtiles==3.7.0

@@ -2376,11 +2376,28 @@ function syncLeafletLayers(leaf) {
     leaf.overlayLayer = null;
   }
   const overlay = state.mapData?.overlay;
-  if (overlay?.bounds && overlay.image_url) {
+  if (overlay?.bounds && (overlay.tile_url || overlay.image_url)) {
     const [ox1, oy1, ox2, oy2] = overlay.bounds;
-    leaf.overlayLayer = L.imageOverlay(overlay.image_url, [[oy1, ox1], [oy2, ox2]], {
-      opacity: 0.72,
-    }).addTo(leaf.map);
+    const overlayBounds = L.latLngBounds([oy1, ox1], [oy2, ox2]);
+    if (overlay.tile_url) {
+      // Tile pyramid (PMTiles-backed): the GPU only holds visible tiles,
+      // which avoids the oversized-texture compositor corruption that a
+      // single full-resolution imageOverlay causes in the desktop shell.
+      leaf.overlayLayer = L.tileLayer(overlay.tile_url, {
+        bounds: overlayBounds,
+        minNativeZoom: overlay.tile_min_zoom,
+        maxNativeZoom: overlay.tile_max_zoom,
+        minZoom: -12,
+        maxZoom: 12,
+        tileSize: 256,
+        opacity: 0.72,
+        updateWhenZooming: false,
+      }).addTo(leaf.map);
+    } else {
+      leaf.overlayLayer = L.imageOverlay(overlay.image_url, overlayBounds, {
+        opacity: 0.72,
+      }).addTo(leaf.map);
+    }
     leaf.overlayLayer.bringToBack();
   }
 
