@@ -1,6 +1,5 @@
 const state = {
   appInfo: null,
-  cacheCleanupResult: null,
   projects: [],
   currentProjectId: null,
   archiveFolders: [],
@@ -94,7 +93,6 @@ const elements = {
   overlayTable: document.getElementById("overlay-table"),
   renameButton: document.getElementById("rename-button"),
   rollbackButton: document.getElementById("rollback-button"),
-  clearUnusedCacheButton: document.getElementById("clear-unused-cache-button"),
   sharedNamingEnabled: document.getElementById("shared-naming-enabled"),
   sharedNamingUrl: document.getElementById("shared-naming-url"),
   sharedNamingKey: document.getElementById("shared-naming-key"),
@@ -122,6 +120,7 @@ const elements = {
   smartFtpPassword: document.getElementById("smart-ftp-password"),
   smartFtpRemotePath: document.getElementById("smart-ftp-remote-path"),
   smartFtpProtocol: document.getElementById("smart-ftp-protocol"),
+  smartFtpEnabled: document.getElementById("smart-ftp-enabled"),
   smartSettingsSaveButton: document.getElementById("smart-settings-save-button"),
   smartFtpTestButton: document.getElementById("smart-ftp-test-button"),
   smartSettingsStatus: document.getElementById("smart-settings-status"),
@@ -242,14 +241,8 @@ const elements = {
   mapLabelsToggle: document.getElementById("map-labels-toggle"),
   mapOriginalLabelToggle: document.getElementById("map-original-label-toggle"),
   mapProposedLabelToggle: document.getElementById("map-proposed-label-toggle"),
-  zoomInButton: document.getElementById("zoom-in-button"),
-  zoomOutButton: document.getElementById("zoom-out-button"),
   zoomResetButton: document.getElementById("zoom-reset-button"),
   runsTable: document.getElementById("runs-table"),
-  troubleshootSummary: document.getElementById("troubleshoot-summary"),
-  appInfoPanel: document.getElementById("app-info-panel"),
-  cacheCleanupResult: document.getElementById("cache-cleanup-result"),
-  rollbackResultsTable: document.getElementById("rollback-results-table"),
   busyOverlay: document.getElementById("busy-overlay"),
   busyMessage: document.getElementById("busy-message"),
   busyDetail: document.getElementById("busy-detail"),
@@ -646,7 +639,6 @@ const TAB_ROUTES = {
   system: { tab: "system" },
   settings: { tab: "system", mode: "settings" },
   audit: { tab: "system", mode: "audit" },
-  troubleshoot: { tab: "system", mode: "maintenance" },
 };
 
 function setModeSections(kind, mode) {
@@ -877,11 +869,17 @@ async function refreshProjectData() {
   state.savedFilters = savedFilters;
   state.duplicatePairs = duplicatePairs;
   state.auditEvents = auditEvents;
-  if (state.currentCollectionId && state.collections.some((item) => item.id === state.currentCollectionId)) {
-    state.collectionDetail = await api(`/api/collections/${state.currentCollectionId}/detail`);
-  } else {
-    state.currentCollectionId = state.collections[0]?.id || null;
-    state.collectionDetail = state.currentCollectionId ? await api(`/api/collections/${state.currentCollectionId}/detail`) : null;
+  // A failed collection-detail fetch must never abort the refresh — that
+  // would leave the whole UI unrendered (empty tables, "v-" badge).
+  try {
+    if (!state.currentCollectionId || !state.collections.some((item) => item.id === state.currentCollectionId)) {
+      state.currentCollectionId = state.collections[0]?.id || null;
+    }
+    state.collectionDetail = state.currentCollectionId
+      ? await api(`/api/collections/${state.currentCollectionId}/detail`)
+      : null;
+  } catch (_error) {
+    state.collectionDetail = null;
   }
   state.mapData = null;
   state.mapDataLoading = true;
@@ -1045,34 +1043,12 @@ function renderAll() {
   renderViewer();
   renderRuns();
   renderAudit();
-  renderTroubleshoot();
   renderMap();
 }
 
 function renderAppInfo() {
   const version = state.appInfo?.version || "-";
   elements.appVersionBadge.textContent = `v${version}`;
-  if (!state.appInfo) {
-    elements.appInfoPanel.textContent = "App info unavailable.";
-    return;
-  }
-  elements.appInfoPanel.innerHTML = `
-    <strong>${state.appInfo.app_name} v${state.appInfo.version}</strong><br>
-    CRS: ${state.appInfo.crs}<br>
-    Data Dir: ${state.appInfo.data_dir}<br>
-    Database: ${state.appInfo.db_path}<br>
-    Storage: ${state.appInfo.storage_dir}<br>
-    Preview Cache: ${state.appInfo.overlay_preview_dir}<br>
-    Thumbnails: ${state.appInfo.thumbnail_dir}
-  `;
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes || 0);
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function queueMapRefit() {
@@ -2033,8 +2009,11 @@ function renderViewerOverlay(overlay, payload, width, height, yaw, pitch) {
 }
 
 function renderRuns() {
+  const latestRun = state.runs[0] || null;
+  elements.rollbackButton.disabled =
+    !state.currentProjectId || !latestRun || Boolean(latestRun.rollback_completed_at);
   if (!state.runs.length) {
-    elements.runsTable.innerHTML = `<tr><td colspan="6">No rename runs yet.</td></tr>`;
+    elements.runsTable.innerHTML = `<tr><td colspan="5">No rename runs yet.</td></tr>`;
     return;
   }
   elements.runsTable.innerHTML = state.runs.map((run, index) => {
@@ -2051,62 +2030,9 @@ function renderRuns() {
           : canRollback
             ? badge("Rollback Ready")
             : badge("Locked")}</td>
-        <td>
-          <button class="secondary" type="button" data-action="open-troubleshoot" ${canRollback ? "" : "disabled"}>Rollback</button>
-        </td>
       </tr>
     `;
   }).join("");
-}
-
-function renderTroubleshoot() {
-  if (!state.currentProjectId) {
-    elements.troubleshootSummary.textContent = "No template selected.";
-    elements.rollbackResultsTable.innerHTML = `<tr><td colspan="3">Create or select a template first.</td></tr>`;
-    elements.rollbackButton.disabled = true;
-    elements.clearUnusedCacheButton.disabled = false;
-    elements.cacheCleanupResult.textContent = state.cacheCleanupResult
-      ? `Deleted ${state.cacheCleanupResult.deleted_count} files and freed ${formatBytes(state.cacheCleanupResult.deleted_bytes)}.`
-      : "No cache cleanup run yet.";
-    return;
-  }
-
-  const latestRun = state.runs[0] || null;
-  elements.clearUnusedCacheButton.disabled = false;
-  elements.cacheCleanupResult.textContent = state.cacheCleanupResult
-    ? `Deleted ${state.cacheCleanupResult.deleted_count} files, kept ${state.cacheCleanupResult.kept_count}, freed ${formatBytes(state.cacheCleanupResult.deleted_bytes)}${state.cacheCleanupResult.error_count ? `, ${state.cacheCleanupResult.error_count} errors` : ""}.`
-    : "No cache cleanup run yet.";
-  if (!latestRun) {
-    elements.troubleshootSummary.textContent = "No rename runs are available yet for this template.";
-    elements.rollbackResultsTable.innerHTML = `<tr><td colspan="3">No rollback history yet.</td></tr>`;
-    elements.rollbackButton.disabled = true;
-    return;
-  }
-
-  const summary = latestRun.summary || {};
-  const status = latestRun.rollback_completed_at
-    ? "Rolled back"
-    : "Rollback available";
-  elements.troubleshootSummary.innerHTML = `
-    <strong>${status}</strong><br>
-    Started: ${fmtDate(latestRun.started_at)}<br>
-    Completed: ${fmtDate(latestRun.completed_at)}<br>
-    Summary: ${summary.renamed || 0} renamed, ${summary.unchanged || 0} unchanged, ${summary.errors || 0} errors.
-  `;
-  elements.rollbackButton.disabled = Boolean(latestRun.rollback_completed_at);
-
-  const rollbackResults = latestRun.rollback_results || [];
-  if (!rollbackResults.length) {
-    elements.rollbackResultsTable.innerHTML = `<tr><td colspan="3">No rollback has been run for the latest rename batch.</td></tr>`;
-    return;
-  }
-  elements.rollbackResultsTable.innerHTML = rollbackResults.map((result) => `
-    <tr>
-      <td>${baseName(result.original_path || result.current_path || "") || "-"}</td>
-      <td>${badge(result.status.replace(/_/g, " "))}</td>
-      <td>${result.detail || "-"}</td>
-    </tr>
-  `).join("");
 }
 
 function labelLinesForPhoto(photo) {
@@ -2564,15 +2490,6 @@ function resetMapView() {
   fitMapToData(state.leaflet);
 }
 
-function zoomMap(direction) {
-  if (!state.leaflet) return;
-  if (direction === "in") {
-    state.leaflet.map.zoomIn();
-  } else {
-    state.leaflet.map.zoomOut();
-  }
-}
-
 function centerMapOnPhoto(photoId, zoomIn = false) {
   const leaf = state.leaflet;
   const photo = state.photos.find((item) => item.id === photoId);
@@ -2726,12 +2643,6 @@ function handleViewerOverlayClick(event) {
   const context = state.viewerContext.source === "collection" ? "collection" : "viewer";
   const collectionId = state.viewerContext.collectionId;
   loadViewer(photoId, context, collectionId).catch((error) => setStatus(error.message, true));
-}
-
-function handleRunsClick(event) {
-  const troubleshootButton = event.target.closest('[data-action="open-troubleshoot"]');
-  if (!troubleshootButton) return;
-  setTab("troubleshoot");
 }
 
 async function createProject(event) {
@@ -3076,9 +2987,13 @@ function smartSettingsStatusText(settings) {
   const missing = [];
   if (!settings.import_base_path) missing.push("import folder");
   if (!settings.archive_base_path) missing.push("archive folder");
-  if (!settings.ftp_host || !settings.ftp_username) missing.push("FTP server");
-  if (!missing.length) return "Smart Mode is fully configured.";
-  return `Smart Mode needs: ${missing.join(", ")}.`;
+  if (settings.ftp_enabled && (!settings.ftp_host || !settings.ftp_username)) {
+    missing.push("FTP server (or turn upload off)");
+  }
+  if (missing.length) return `Smart Mode needs: ${missing.join(", ")}.`;
+  return settings.ftp_enabled
+    ? "Smart Mode is fully configured."
+    : "Smart Mode is configured. Server upload is off — exports stay local.";
 }
 
 function applyUiMode(mode) {
@@ -3109,6 +3024,7 @@ async function loadSmartSettings() {
   elements.smartFtpPassword.value = settings.ftp_password || "";
   elements.smartFtpRemotePath.value = settings.ftp_remote_path || "";
   elements.smartFtpProtocol.value = settings.ftp_protocol || "ftp";
+  elements.smartFtpEnabled.checked = Boolean(settings.ftp_enabled);
   elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
   applyUiMode(settings.ui_mode);
 }
@@ -3125,6 +3041,7 @@ async function saveSmartSettings() {
       ftp_password: elements.smartFtpPassword.value,
       ftp_remote_path: elements.smartFtpRemotePath.value.trim(),
       ftp_protocol: elements.smartFtpProtocol.value,
+      ftp_enabled: elements.smartFtpEnabled.checked,
     }),
   });
   state.smartSettings = settings;
@@ -3334,23 +3251,6 @@ async function rollbackLastRun() {
   const errors = rollbackResults.length - restored;
   setStatus(`Rollback complete. ${restored} restored, ${errors} errors.`);
   setTab("photos");
-}
-
-async function cleanupUnusedCache() {
-  const accepted = await showDecisionModal({
-    title: "Clear Unused Cache",
-    description: "Clear unused overlay preview cache files?",
-    primaryLabel: "Clear Cache",
-    danger: true,
-  });
-  if (!accepted) return;
-  const result = await api("/api/cache/cleanup-unused", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-  state.cacheCleanupResult = result;
-  renderTroubleshoot();
-  setStatus(`Cache cleanup complete. Removed ${result.deleted_count} files and freed ${formatBytes(result.deleted_bytes)}.`);
 }
 
 async function createArchiveFolder() {
@@ -4207,9 +4107,6 @@ elements.renameButton.addEventListener("click", () => {
 elements.rollbackButton.addEventListener("click", () => {
   rollbackLastRun().catch((error) => setStatus(error.message, true));
 });
-elements.clearUnusedCacheButton.addEventListener("click", () => {
-  cleanupUnusedCache().catch((error) => setStatus(error.message, true));
-});
 elements.sharedNamingSaveButton.addEventListener("click", () => {
   saveSharedNamingSettings().catch((error) => setStatus(error.message, true));
 });
@@ -4240,7 +4137,6 @@ elements.smartFtpTestButton.addEventListener("click", () => {
 elements.smartProgressCloseButton.addEventListener("click", () => {
   elements.smartProgressModal.hidden = true;
 });
-elements.runsTable.addEventListener("click", handleRunsClick);
 elements.drawAreaButton.addEventListener("click", startDrawArea);
 elements.addAreaButton.addEventListener("click", () => {
   addArea().catch((error) => setStatus(error.message, true));
@@ -4379,8 +4275,6 @@ elements.mapDetail.addEventListener("focusout", handleMapDetailFocusOut);
 document.addEventListener("click", handleDocumentClick);
 document.addEventListener("click", handleCustomSelectClick);
 document.addEventListener("fullscreenchange", renderViewer);
-elements.zoomInButton.addEventListener("click", () => zoomMap("in"));
-elements.zoomOutButton.addEventListener("click", () => zoomMap("out"));
 elements.mapLabelsToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapOriginalLabelToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapProposedLabelToggle.addEventListener("change", handleMapLabelToggleChange);

@@ -63,6 +63,7 @@ def register_smart_routes(
             "ftp_password": settings.ftp_password,
             "ftp_remote_path": settings.ftp_remote_path,
             "ftp_protocol": settings.ftp_protocol,
+            "ftp_enabled": settings.ftp_enabled,
         }
 
     @app.get("/api/smart/settings", response_model=SmartSettingsResponse)
@@ -85,6 +86,7 @@ def register_smart_routes(
                 "ftp_password",
                 "ftp_remote_path",
                 "ftp_protocol",
+                "ftp_enabled",
             ):
                 value = getattr(payload, field_name)
                 if value is not None:
@@ -247,10 +249,12 @@ def register_smart_routes(
                 detail="Supabase must be configured (System settings) so exported "
                 "panos can be registered for duplicate detection.",
             )
-        if not settings.ftp_configured():
+        upload_enabled = settings.ftp_enabled
+        if upload_enabled and not settings.ftp_configured():
             raise HTTPException(
                 status_code=400,
-                detail="Set the FTP server in System settings before exporting.",
+                detail="Set the FTP server in System settings, or turn off "
+                "server upload to export without it.",
             )
         if not settings.archive_base_path:
             raise HTTPException(
@@ -312,20 +316,23 @@ def register_smart_routes(
             except SharedNamingError as exc:
                 errors.append(str(exc))
 
-        # Phase 3: FTP upload.
+        # Phase 3: FTP upload (skipped entirely when server upload is off;
+        # photos then archive straight from 'registered').
         uploaded = 0
         failed = 0
-        with db.connect() as conn:
-            to_upload = conn.execute(
-                """
-                SELECT id, original_path, capture_ts
-                FROM photos
-                WHERE project_id = ? AND applied = 1
-                  AND smart_original_name IS NOT NULL
-                  AND upload_status = 'registered'
-                """,
-                (project_id,),
-            ).fetchall()
+        to_upload = []
+        if upload_enabled:
+            with db.connect() as conn:
+                to_upload = conn.execute(
+                    """
+                    SELECT id, original_path, capture_ts
+                    FROM photos
+                    WHERE project_id = ? AND applied = 1
+                      AND smart_original_name IS NOT NULL
+                      AND upload_status = 'registered'
+                    """,
+                    (project_id,),
+                ).fetchall()
         if to_upload:
             items = []
             for row in to_upload:
@@ -362,17 +369,20 @@ def register_smart_routes(
                         )
                 conn.commit()
 
-        # Phase 4: archive uploaded files locally.
+        # Phase 4: archive files locally. With upload off, 'registered'
+        # photos archive directly and keep that status distinction via
+        # uploaded_at staying NULL.
         archived = 0
+        archivable_statuses = "('uploaded')" if upload_enabled else "('uploaded', 'registered')"
         archive_base = Path(settings.archive_base_path)
         with db.connect() as conn:
             to_archive = conn.execute(
-                """
+                f"""
                 SELECT id, original_path, capture_ts
                 FROM photos
                 WHERE project_id = ? AND applied = 1
                   AND smart_original_name IS NOT NULL
-                  AND upload_status = 'uploaded'
+                  AND upload_status IN {archivable_statuses}
                 """,
                 (project_id,),
             ).fetchall()

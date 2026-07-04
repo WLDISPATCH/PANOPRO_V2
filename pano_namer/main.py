@@ -13,6 +13,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve app.js/styles.css with revalidation so they can never go stale.
+
+    index.html is served no-store, but without cache headers here browsers
+    could pair a fresh index.html with a cached old app.js after a reload,
+    crashing the whole frontend (missing element ids, "V-" badge, dead UI).
+    no-cache still allows fast 304 responses via ETag/Last-Modified.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
 from pano_namer.api.routes.areas import register_area_routes
 from pano_namer.api.routes.overlays import register_overlay_routes
 from pano_namer.api.routes.projects import register_project_routes
@@ -849,7 +864,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     install_auth_gate(app)
     install_admin(app, cfg)
 
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
     register_system_routes(app, cfg, db, STATIC_DIR)
     register_project_routes(app, cfg, db, storage)
     register_area_routes(app, db, storage)
@@ -1808,7 +1823,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if collection is None:
                 raise HTTPException(status_code=404, detail="Collection not found")
             item_rows = conn.execute(
-                "SELECT photo_id FROM collection_items WHERE collection_id = ? ORDER BY item_order, id",
+                """
+                SELECT collection_items.photo_id
+                FROM collection_items
+                JOIN photos ON photos.id = collection_items.photo_id
+                WHERE collection_items.collection_id = ?
+                ORDER BY collection_items.item_order, collection_items.id
+                """,
                 (collection_id,),
             ).fetchall()
             photos = [
