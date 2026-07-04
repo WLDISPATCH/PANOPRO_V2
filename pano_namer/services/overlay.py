@@ -24,6 +24,30 @@ def _extract_pdf_arrays(raw: str) -> tuple[list[float] | None, list[float] | Non
     return lpts, gpts
 
 
+def _extract_pdf_viewport_bbox(raw: str) -> list[float] | None:
+    match = re.search(
+        r"/VP\s*\[\s*<<.*?/BBox\s*\[([^\]]+)\]",
+        raw,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        match = re.search(
+            r"/Type\s*/Viewport.*?/BBox\s*\[([^\]]+)\]",
+            raw,
+            re.IGNORECASE | re.DOTALL,
+        )
+    if not match:
+        return None
+
+    bbox = _number_list(match.group(1))
+    if len(bbox) < 4:
+        return None
+    x1, y1, x2, y2 = bbox[:4]
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2, y2]
+
+
 def _extract_lgi_registration(raw: str) -> list[float] | None:
     match = re.search(r"/Registration\s*\[\s*\[(.*?)\]\s*\[(.*?)\]\s*\]", raw, re.IGNORECASE | re.DOTALL)
     if not match:
@@ -57,7 +81,11 @@ def _pdf_bounds_from_gpts(gpts: list[float]) -> list[float]:
     return [min(xs), min(ys), max(xs), max(ys)]
 
 
-def _render_pdf_preview(path: Path, preview_dir: Path | None = None) -> tuple[Path, int, int]:
+def _render_pdf_preview(
+    path: Path,
+    preview_dir: Path | None = None,
+    viewport_bbox: list[float] | None = None,
+) -> tuple[Path, int, int]:
     import fitz
 
     preview_dir = (preview_dir or overlay_preview_dir(Path.cwd() / ".pano_namer_data")).resolve()
@@ -69,7 +97,15 @@ def _render_pdf_preview(path: Path, preview_dir: Path | None = None) -> tuple[Pa
     document = fitz.open(path)
     try:
         page = document.load_page(0)
-        pixmap = page.get_pixmap(dpi=150, alpha=False)
+        clip = None
+        if viewport_bbox:
+            x1, y1, x2, y2 = viewport_bbox
+            page_height = page.rect.height
+            clip = fitz.Rect(x1, page_height - y2, x2, page_height - y1)
+            clip = clip & page.rect
+            if clip.is_empty:
+                clip = None
+        pixmap = page.get_pixmap(dpi=150, alpha=False, clip=clip)
         pixmap.save(preview_path)
         return preview_path, pixmap.width, pixmap.height
     finally:
@@ -83,12 +119,15 @@ def parse_overlay_metadata(
     if path.suffix.lower() == ".pdf":
         raw = path.read_bytes().decode("latin-1", errors="ignore")
         registration_bounds = _extract_lgi_registration(raw)
+        viewport_bbox = None if registration_bounds else _extract_pdf_viewport_bbox(raw)
         _lpts, gpts = _extract_pdf_arrays(raw)
         if not gpts and not registration_bounds:
             return path, FIXED_CRS, None, None, None, "Could not read geospatial PDF bounds metadata from the overlay PDF."
         try:
             bounds = registration_bounds or _pdf_bounds_from_gpts(gpts or [])
-            preview_path, width, height = _render_pdf_preview(path, preview_dir)
+            preview_path, width, height = _render_pdf_preview(
+                path, preview_dir, viewport_bbox=viewport_bbox
+            )
         except Exception as exc:  # pragma: no cover
             return path, FIXED_CRS, None, None, None, f"Unable to read the geospatial PDF overlay: {exc}"
         return preview_path, FIXED_CRS, bounds, width, height, None
