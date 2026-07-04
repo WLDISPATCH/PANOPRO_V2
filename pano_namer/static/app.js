@@ -122,6 +122,7 @@ const elements = {
   smartFtpPassword: document.getElementById("smart-ftp-password"),
   smartFtpRemotePath: document.getElementById("smart-ftp-remote-path"),
   smartFtpProtocol: document.getElementById("smart-ftp-protocol"),
+  smartFtpEnabled: document.getElementById("smart-ftp-enabled"),
   smartSettingsSaveButton: document.getElementById("smart-settings-save-button"),
   smartFtpTestButton: document.getElementById("smart-ftp-test-button"),
   smartSettingsStatus: document.getElementById("smart-settings-status"),
@@ -3076,9 +3077,13 @@ function smartSettingsStatusText(settings) {
   const missing = [];
   if (!settings.import_base_path) missing.push("import folder");
   if (!settings.archive_base_path) missing.push("archive folder");
-  if (!settings.ftp_host || !settings.ftp_username) missing.push("FTP server");
-  if (!missing.length) return "Smart Mode is fully configured.";
-  return `Smart Mode needs: ${missing.join(", ")}.`;
+  if (settings.ftp_enabled && (!settings.ftp_host || !settings.ftp_username)) {
+    missing.push("FTP server (or turn upload off)");
+  }
+  if (missing.length) return `Smart Mode needs: ${missing.join(", ")}.`;
+  return settings.ftp_enabled
+    ? "Smart Mode is fully configured."
+    : "Smart Mode is configured. Server upload is off — exports stay local.";
 }
 
 function applyUiMode(mode) {
@@ -3109,6 +3114,7 @@ async function loadSmartSettings() {
   elements.smartFtpPassword.value = settings.ftp_password || "";
   elements.smartFtpRemotePath.value = settings.ftp_remote_path || "";
   elements.smartFtpProtocol.value = settings.ftp_protocol || "ftp";
+  elements.smartFtpEnabled.checked = Boolean(settings.ftp_enabled);
   elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
   applyUiMode(settings.ui_mode);
 }
@@ -3125,6 +3131,7 @@ async function saveSmartSettings() {
       ftp_password: elements.smartFtpPassword.value,
       ftp_remote_path: elements.smartFtpRemotePath.value.trim(),
       ftp_protocol: elements.smartFtpProtocol.value,
+      ftp_enabled: elements.smartFtpEnabled.checked,
     }),
   });
   state.smartSettings = settings;

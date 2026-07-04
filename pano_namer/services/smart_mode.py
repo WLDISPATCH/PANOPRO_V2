@@ -16,6 +16,7 @@ _SETTING_FTP_USERNAME = "smart_mode.ftp_username"
 _SETTING_FTP_PASSWORD = "smart_mode.ftp_password"
 _SETTING_FTP_REMOTE_PATH = "smart_mode.ftp_remote_path"
 _SETTING_FTP_PROTOCOL = "smart_mode.ftp_protocol"
+_SETTING_FTP_ENABLED = "smart_mode.ftp_enabled"
 
 UI_MODE_ADVANCED = "advanced"
 UI_MODE_SMART = "smart"
@@ -39,6 +40,7 @@ class SmartModeSettings:
     ftp_password: str = ""
     ftp_remote_path: str = ""
     ftp_protocol: str = PROTOCOL_FTP
+    ftp_enabled: bool = False
 
     def ftp_configured(self) -> bool:
         return bool(self.ftp_host and self.ftp_username)
@@ -74,6 +76,7 @@ def load_settings(conn: sqlite3.Connection) -> SmartModeSettings:
         ftp_password=values.get(_SETTING_FTP_PASSWORD, ""),
         ftp_remote_path=values.get(_SETTING_FTP_REMOTE_PATH, "").strip(),
         ftp_protocol=protocol,
+        ftp_enabled=values.get(_SETTING_FTP_ENABLED, "").strip().lower() == "true",
     )
 
 
@@ -89,6 +92,7 @@ def save_settings(conn: sqlite3.Connection, settings: SmartModeSettings) -> None
         _SETTING_FTP_PASSWORD: settings.ftp_password,
         _SETTING_FTP_REMOTE_PATH: settings.ftp_remote_path.strip(),
         _SETTING_FTP_PROTOCOL: settings.ftp_protocol.strip().lower(),
+        _SETTING_FTP_ENABLED: "true" if settings.ftp_enabled else "false",
     }
     for key, value in values.items():
         conn.execute(

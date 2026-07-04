@@ -382,6 +382,7 @@ class SmartSettingsPayload(BaseModel):
     ftp_password: str | None = None
     ftp_remote_path: str | None = None
     ftp_protocol: str | None = None
+    ftp_enabled: bool | None = None
 
 
 class SmartSettingsResponse(BaseModel):
@@ -394,6 +395,7 @@ class SmartSettingsResponse(BaseModel):
     ftp_password: str
     ftp_remote_path: str
     ftp_protocol: str
+    ftp_enabled: bool
 
 
 class SmartDrivesResponse(BaseModel):

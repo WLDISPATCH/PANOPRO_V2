@@ -139,6 +139,7 @@ class TestSmartModeSettings:
         assert settings.ftp_protocol == "ftp"
         assert settings.resolved_port() == 21
         assert not settings.ftp_configured()
+        assert not settings.ftp_enabled
 
     def test_roundtrip(self, conn):
         settings = smart_mode.SmartModeSettings(
@@ -151,6 +152,7 @@ class TestSmartModeSettings:
             ftp_password="secret",
             ftp_remote_path="/panos",
             ftp_protocol="sftp",
+            ftp_enabled=True,
         )
         smart_mode.save_settings(conn, settings)
         conn.commit()
