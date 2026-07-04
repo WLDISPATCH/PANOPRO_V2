@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+_XMP_HEADER_READ_BYTES = 2 * 1024 * 1024
+
 
 def _ratio_to_float(value: Any) -> float:
     if hasattr(value, "num") and hasattr(value, "den"):
@@ -34,6 +36,33 @@ def _extract_xmp_value(raw: str, key: str) -> str | None:
     return None
 
 
+def _apply_xmp_metadata(
+    raw: str,
+    gps_lat: float | None,
+    gps_lon: float | None,
+    capture_ts: str | None,
+) -> tuple[float | None, float | None, str | None]:
+    if gps_lat is None:
+        value = _extract_xmp_value(raw, "drone-dji:GpsLatitude") or _extract_xmp_value(
+            raw, "exif:GPSLatitude"
+        )
+        if value is not None:
+            gps_lat = float(value)
+    if gps_lon is None:
+        value = _extract_xmp_value(
+            raw, "drone-dji:GpsLongtitude"
+        ) or _extract_xmp_value(raw, "drone-dji:GpsLongitude")
+        if value is not None:
+            gps_lon = float(value)
+    if capture_ts is None:
+        value = _extract_xmp_value(raw, "xmp:CreateDate") or _extract_xmp_value(
+            raw, "photoshop:DateCreated"
+        )
+        if value:
+            capture_ts = value.replace("Z", "+00:00")
+    return gps_lat, gps_lon, capture_ts
+
+
 def read_photo_metadata(path: Path) -> dict[str, Any]:
     import exifread
 
@@ -53,19 +82,22 @@ def read_photo_metadata(path: Path) -> dict[str, Any]:
     elif "Image DateTime" in tags:
         capture_ts = datetime.strptime(str(tags["Image DateTime"]), "%Y:%m:%d %H:%M:%S").isoformat()
 
-    raw = path.read_bytes().decode("utf-8", errors="ignore")
-    if gps_lat is None:
-        value = _extract_xmp_value(raw, "drone-dji:GpsLatitude") or _extract_xmp_value(raw, "exif:GPSLatitude")
-        if value is not None:
-            gps_lat = float(value)
-    if gps_lon is None:
-        value = _extract_xmp_value(raw, "drone-dji:GpsLongtitude") or _extract_xmp_value(raw, "drone-dji:GpsLongitude")
-        if value is not None:
-            gps_lon = float(value)
-    if capture_ts is None:
-        value = _extract_xmp_value(raw, "xmp:CreateDate") or _extract_xmp_value(raw, "photoshop:DateCreated")
-        if value:
-            capture_ts = value.replace("Z", "+00:00")
+    with path.open("rb") as handle:
+        raw = handle.read(_XMP_HEADER_READ_BYTES).decode("utf-8", errors="ignore")
+    gps_lat, gps_lon, capture_ts = _apply_xmp_metadata(
+        raw, gps_lat, gps_lon, capture_ts
+    )
+
+    if (
+        gps_lat is None
+        and gps_lon is None
+        and capture_ts is None
+        and path.stat().st_size > _XMP_HEADER_READ_BYTES
+    ):
+        raw = path.read_bytes().decode("utf-8", errors="ignore")
+        gps_lat, gps_lon, capture_ts = _apply_xmp_metadata(
+            raw, gps_lat, gps_lon, capture_ts
+        )
 
     return {
         "gps_lat": gps_lat,
