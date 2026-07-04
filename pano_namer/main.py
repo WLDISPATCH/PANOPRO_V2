@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+import os
 import sqlite3
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -84,7 +86,7 @@ from pano_namer.schemas import (
 )
 from pano_namer.services.common import dumps_json, ensure_path, loads_json, utc_now
 from pano_namer.services.dxf import build_manual_polygon_wkt, extract_area_geometry_wkt
-from pano_namer.services.media import content_hash, ensure_thumbnail
+from pano_namer.services.media import content_hash, ensure_thumbnail, prepare_thumbnail
 from pano_namer.services.matching import choose_area_match
 from pano_namer.services.photos import read_photo_metadata
 from pano_namer.services import overlay_tiles, shared_naming
@@ -363,7 +365,11 @@ def log_audit(
 
 
 def ensure_photo_thumbnail(
-    conn: sqlite3.Connection, cfg: AppConfig, photo_id: int, photo_path: Path
+    conn: sqlite3.Connection,
+    cfg: AppConfig,
+    photo_id: int,
+    photo_path: Path,
+    precomputed: tuple[bytes, int, int] | None = None,
 ) -> dict[str, Any] | None:
     if not photo_path.exists():
         return None
@@ -378,9 +384,14 @@ def ensure_photo_thumbnail(
             "url": f"/api/photos/{photo_id}/thumbnail",
         }
     try:
-        thumb_path, width, height = ensure_thumbnail(
-            photo_path, thumbnail_dir(cfg), photo_id
-        )
+        if precomputed is None:
+            thumb_path, width, height = ensure_thumbnail(
+                photo_path, thumbnail_dir(cfg), photo_id
+            )
+        else:
+            data, width, height = precomputed
+            thumb_path = thumbnail_dir(cfg) / f"photo_{photo_id}.jpg"
+            thumb_path.write_bytes(data)
     except Exception:
         return None
     conn.execute(
@@ -400,6 +411,31 @@ def ensure_photo_thumbnail(
         "width": width,
         "height": height,
         "url": f"/api/photos/{photo_id}/thumbnail",
+    }
+
+
+def prepare_photo_import(source_path: Path) -> dict[str, Any]:
+    try:
+        meta = read_photo_metadata(source_path)
+        hash_value = content_hash(source_path)
+    except Exception as exc:
+        return {
+            "meta": None,
+            "hash_value": None,
+            "thumb": None,
+            "error": str(exc),
+        }
+
+    try:
+        thumb = prepare_thumbnail(source_path)
+    except Exception:
+        thumb = None
+
+    return {
+        "meta": meta,
+        "hash_value": hash_value,
+        "thumb": thumb,
+        "error": None,
     }
 
 
@@ -892,6 +928,31 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         import_results: list[dict[str, Any]] = []
         with db.connect() as conn:
             fetch_project(conn, project_id)
+            existing_paths_snapshot = {
+                row["original_path"]
+                for row in conn.execute(
+                    "SELECT original_path FROM photos WHERE project_id = ?",
+                    (project_id,),
+                ).fetchall()
+            }
+
+        prep_indices = [
+            index
+            for index, source_path in enumerate(paths)
+            if str(source_path) not in existing_paths_snapshot
+        ]
+        prepared_by_index: dict[int, dict[str, Any]] = {}
+        if prep_indices:
+            max_workers = min(8, os.cpu_count() or 4)
+            prep_paths = (paths[index] for index in prep_indices)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for index, prepared in zip(
+                    prep_indices, executor.map(prepare_photo_import, prep_paths)
+                ):
+                    prepared_by_index[index] = prepared
+
+        with db.connect() as conn:
+            fetch_project(conn, project_id)
             batch_id = uuid4().hex
             now = utc_now()
             batch_cursor = conn.execute(
@@ -913,7 +974,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 ).fetchall()
             }
 
-            for source_path in paths:
+            for index, source_path in enumerate(paths):
                 source_value = str(source_path)
                 if source_value in existing_paths:
                     import_results.append(
@@ -925,19 +986,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                         }
                     )
                     continue
-                try:
-                    meta = read_photo_metadata(source_path)
-                    hash_value = content_hash(source_path)
-                except Exception as exc:
+                prepared = prepared_by_index.get(index)
+                if prepared is None:
+                    prepared = prepare_photo_import(source_path)
+                if prepared["error"] is not None:
                     import_results.append(
                         {
                             "path": source_value,
                             "status": "error",
-                            "detail": str(exc),
+                            "detail": prepared["error"],
                             "photo": None,
                         }
                     )
                     continue
+                meta = prepared["meta"]
+                hash_value = prepared["hash_value"]
                 cursor = conn.execute(
                     """
                     INSERT INTO photos (
@@ -967,7 +1030,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 )
                 photo_id = cursor.lastrowid
                 created_ids.append(photo_id)
-                ensure_photo_thumbnail(conn, cfg, photo_id, source_path)
+                ensure_photo_thumbnail(
+                    conn, cfg, photo_id, source_path, prepared["thumb"]
+                )
                 ensure_photo_view_state(conn, photo_id)
                 weekly_name = weekly_collection_name(meta["capture_ts"])
                 if weekly_name:
