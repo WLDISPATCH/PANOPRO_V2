@@ -546,9 +546,9 @@
         </div>
 
         <div class="mode-section active" data-system-section="settings">
-          <div class="troubleshoot-grid">
-            <section class="troubleshoot-card">
-              <h3>Template</h3>
+          <div class="settings-stack">
+            <details class="troubleshoot-card settings-collapse" open>
+              <summary>Template</summary>
               <p class="muted">Create, select, refresh, or delete the active project template.</p>
               <label class="settings-field">
                 <span>Current Template</span>
@@ -563,9 +563,9 @@
                 <button id="delete-project-button" class="danger secondary" type="button">Delete Template</button>
               </div>
               <div id="status-pill" class="troubleshoot-copy muted">No template selected</div>
-            </section>
-            <section class="troubleshoot-card">
-              <h3>Shared Pano Naming</h3>
+            </details>
+            <details class="troubleshoot-card settings-collapse">
+              <summary>Shared Pano Naming</summary>
               <p class="muted">Share rename numbering with other computers through Supabase so two machines never create the same pano name. Photos and project data stay local.</p>
               <label class="settings-field settings-field-inline">
                 <input id="shared-naming-enabled" type="checkbox">
@@ -596,58 +596,60 @@
               <div id="shared-naming-status" class="troubleshoot-copy muted">Loading shared naming settings.</div>
               <div id="area-sync-result" class="troubleshoot-copy muted">No area sync run yet.</div>
               <div id="shared-naming-backfill-result" class="troubleshoot-copy muted">No scan run yet.</div>
-            </section>
-            <section class="troubleshoot-card">
-              <h3>Smart Mode</h3>
-              <p class="muted">Smart Import copies new panos from the SD card into a dated folder. Smart Export renames them, uploads to the server, then moves them to the export end location.</p>
+            </details>
+            <details class="troubleshoot-card settings-collapse">
+              <summary>Smart Mode</summary>
+              <p class="muted">Smart Import copies new panos from the SD card into the temporary folder. Smart Export renames them, uploads to the server, then moves them to the export end location.</p>
               <label class="settings-field">
-                <span>Import folder (SD copies)</span>
+                <span>Temporary folder (SD import)</span>
                 <input id="smart-import-base" type="text" placeholder="D:\Panos" autocomplete="off">
               </label>
               <label class="settings-field">
-                <span>Export end location (archive)</span>
+                <span>Export end location</span>
                 <input id="smart-archive-base" type="text" placeholder="D:\PanoArchive" autocomplete="off">
               </label>
-              <h4 class="settings-subhead">Upload server</h4>
-              <label class="settings-field settings-field-inline">
-                <input id="smart-ftp-enabled" type="checkbox">
-                <span>Upload to server during Smart Export</span>
-              </label>
-              <p class="muted settings-hint">Off: Smart Export still renames, registers, and archives — files just stay local until a server is set up.</p>
-              <label class="settings-field">
-                <span>Protocol</span>
-                <select id="smart-ftp-protocol">
-                  <option value="ftp">FTP</option>
-                  <option value="ftps">FTPS (TLS)</option>
-                  <option value="sftp">SFTP (SSH)</option>
-                </select>
-              </label>
-              <label class="settings-field">
-                <span>Host</span>
-                <input id="smart-ftp-host" type="text" placeholder="ftp.example.com" autocomplete="off">
-              </label>
-              <label class="settings-field">
-                <span>Port (blank = default)</span>
-                <input id="smart-ftp-port" type="number" min="1" max="65535" placeholder="21 (FTP/FTPS) or 22 (SFTP)">
-              </label>
-              <label class="settings-field">
-                <span>Username</span>
-                <input id="smart-ftp-username" type="text" autocomplete="off">
-              </label>
-              <label class="settings-field">
-                <span>Password</span>
-                <input id="smart-ftp-password" type="password" autocomplete="off">
-              </label>
-              <label class="settings-field">
-                <span>Server folder</span>
-                <input id="smart-ftp-remote-path" type="text" placeholder="/panos" autocomplete="off">
-              </label>
+              <details class="settings-collapse settings-collapse-nested">
+                <summary>Upload server</summary>
+                <label class="settings-field settings-field-inline">
+                  <input id="smart-ftp-enabled" type="checkbox">
+                  <span>Upload to server during Smart Export</span>
+                </label>
+                <p class="muted settings-hint">Off: Smart Export still renames, registers, and archives — files just stay local until a server is set up.</p>
+                <label class="settings-field">
+                  <span>Protocol</span>
+                  <select id="smart-ftp-protocol">
+                    <option value="ftp">FTP</option>
+                    <option value="ftps">FTPS (TLS)</option>
+                    <option value="sftp">SFTP (SSH)</option>
+                  </select>
+                </label>
+                <label class="settings-field">
+                  <span>Host</span>
+                  <input id="smart-ftp-host" type="text" placeholder="ftp.example.com" autocomplete="off">
+                </label>
+                <label class="settings-field">
+                  <span>Port (blank = default)</span>
+                  <input id="smart-ftp-port" type="number" min="1" max="65535" placeholder="21 (FTP/FTPS) or 22 (SFTP)">
+                </label>
+                <label class="settings-field">
+                  <span>Username</span>
+                  <input id="smart-ftp-username" type="text" autocomplete="off">
+                </label>
+                <label class="settings-field">
+                  <span>Password</span>
+                  <input id="smart-ftp-password" type="password" autocomplete="off">
+                </label>
+                <label class="settings-field">
+                  <span>Server folder</span>
+                  <input id="smart-ftp-remote-path" type="text" placeholder="/panos" autocomplete="off">
+                </label>
+              </details>
               <div class="detail-actions">
                 <button id="smart-settings-save-button" type="button">Save Settings</button>
                 <button id="smart-ftp-test-button" class="secondary" type="button">Test Connection</button>
               </div>
               <div id="smart-settings-status" class="troubleshoot-copy muted">Loading Smart Mode settings.</div>
-            </section>
+            </details>
           </div>
         </div>
 

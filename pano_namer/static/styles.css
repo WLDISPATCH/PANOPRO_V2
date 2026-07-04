@@ -2560,3 +2560,60 @@ body.smart-mode .smart-actionbar {
   text-transform: uppercase;
   color: var(--muted);
 }
+
+/* ---- Stacked, collapsible System settings ---- */
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+}
+
+details.settings-collapse > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #16294f;
+  user-select: none;
+}
+
+details.settings-collapse > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.settings-collapse > summary::before {
+  content: "▸";
+  color: var(--accent);
+  transition: transform 0.15s ease;
+}
+
+details.settings-collapse[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details.settings-collapse > summary:hover {
+  color: var(--accent);
+}
+
+.settings-collapse-nested {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-collapse-nested > summary {
+  font-size: 0.9rem !important;
+}
