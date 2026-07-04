@@ -173,6 +173,73 @@ class TestSmartModeSettings:
         assert smart_mode.load_settings(conn).ftp_protocol == "ftp"
 
 
+class TestSmartExportArchiveLayout:
+    def test_archive_moves_files_into_dated_panos_folder(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        from pano_namer.config import AppConfig
+        from pano_namer.main import create_app
+        from pano_namer.services.common import utc_now
+        from pano_namer.services.shared_naming import (
+            SharedNamingSettings,
+            save_settings,
+        )
+
+        config = AppConfig.load(tmp_path / "data")
+        app = create_app(config)
+        client = TestClient(app)
+
+        project = client.post("/api/projects", json={"name": "EXPORT-LAYOUT"}).json()
+
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+        renamed = work_dir / "260316_CP_001.jpg"
+        renamed.write_bytes(b"\xff\xd8\xff\xd9")
+        archive_base = tmp_path / "archive"
+
+        db = Database(config.db_path)
+        with db.connect() as conn:
+            now = utc_now()
+            # Photo already renamed + registered; only the archive phase runs
+            # (upload stays off), which is the folder layout under test.
+            conn.execute(
+                """
+                INSERT INTO photos (
+                    project_id, batch_id, original_path, capture_ts,
+                    proposed_filename, applied, smart_original_name,
+                    upload_status, created_at, updated_at
+                )
+                VALUES (?, 'b1', ?, '2026-03-16T12:00:04-06:00',
+                        '260316_CP_001.jpg', 1, 'DJI_0001_PANO.jpg',
+                        'registered', ?, ?)
+                """,
+                (project["id"], str(renamed), now, now),
+            )
+            save_settings(
+                conn,
+                SharedNamingSettings(
+                    supabase_url="https://fake.supabase.co",
+                    supabase_anon_key="anon",
+                ),
+            )
+            smart_mode.save_settings(
+                conn,
+                smart_mode.SmartModeSettings(
+                    archive_base_path=str(archive_base), ftp_enabled=False
+                ),
+            )
+            conn.commit()
+
+        response = client.post("/api/smart/export", json={"project_id": project["id"]})
+        assert response.status_code == 200, response.text
+        summary = response.json()
+        assert summary["archived"] == 1, summary
+
+        expected = archive_base / "260316" / "PANOS" / "260316_CP_001.jpg"
+        assert expected.exists()
+        assert not renamed.exists()
+
+
 class TestSmartModeMigration:
     def test_photos_table_gains_smart_columns(self, tmp_path):
         db = Database(tmp_path / "migrated.db")

@@ -29,7 +29,7 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 from pano_namer.api.routes.areas import register_area_routes
-from pano_namer.api.routes.overlays import register_overlay_routes
+from pano_namer.api.routes.overlays import register_overlay_routes, row_to_overlay
 from pano_namer.api.routes.projects import register_project_routes
 from pano_namer.api.routes.settings import register_settings_routes
 from pano_namer.api.routes.smart import register_smart_routes
@@ -87,7 +87,7 @@ from pano_namer.services.dxf import build_manual_polygon_wkt, extract_area_geome
 from pano_namer.services.media import content_hash, ensure_thumbnail
 from pano_namer.services.matching import choose_area_match
 from pano_namer.services.photos import read_photo_metadata
-from pano_namer.services import shared_naming
+from pano_namer.services import overlay_tiles, shared_naming
 from pano_namer.services.rename import (
     RenamePlanItem,
     apply_rename_plan,
@@ -147,28 +147,6 @@ def row_to_area(row: sqlite3.Row) -> dict[str, Any]:
         "source_crs": row["source_crs"],
         "footprint_bbox": loads_json(row["footprint_bbox_json"], []),
         "active": bool(row["active"]),
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
-
-
-def row_to_overlay(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    source_path = row["jpg_original_path"] or row["jpg_managed_path"] or ""
-    return {
-        "id": row["id"],
-        "project_id": row["project_id"],
-        "display_name": row["display_name"] or Path(source_path).stem or f"Overlay {row['id']}",
-        "jpg_original_path": row["jpg_original_path"],
-        "jpg_managed_path": row["jpg_managed_path"],
-        "image_url": f"/api/overlays/{row['id']}/image",
-        "crs": row["crs"],
-        "bounds": loads_json(row["bounds_json"], None),
-        "width": row["width"],
-        "height": row["height"],
-        "active": bool(row["active"]),
-        "error": row["error"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -848,6 +826,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     db = Database(cfg.db_path)
     db.initialize()
     storage = StorageService(cfg)
+    # Overlays imported before tiling get a pyramid built in the background;
+    # the map falls back to the single-image overlay until it is ready.
+    overlay_tiles.backfill_overlay_tiles(db, cfg.data_dir)
 
     app = FastAPI(title="PANO PRO", version=__version__)
     app.add_middleware(

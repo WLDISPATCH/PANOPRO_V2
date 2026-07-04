@@ -11,6 +11,9 @@ from fastapi.responses import FileResponse
 from pano_namer.config import AppConfig, FIXED_CRS
 from pano_namer.database import Database
 from pano_namer.schemas import OverlayCreate, OverlayResponse, OverlayUpdate
+from fastapi.responses import Response
+
+from pano_namer.services import overlay_tiles
 from pano_namer.services.common import dumps_json, ensure_path, loads_json, utc_now
 from pano_namer.services.overlay import overlay_preview_dir, parse_overlay_metadata
 from pano_namer.services.storage import StorageService
@@ -38,6 +41,8 @@ def row_to_overlay(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     source_path = row["jpg_original_path"] or row["jpg_managed_path"] or ""
+    keys = row.keys()
+    has_tiles = "pmtiles_path" in keys and row["pmtiles_path"]
     return {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -45,6 +50,11 @@ def row_to_overlay(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "jpg_original_path": row["jpg_original_path"],
         "jpg_managed_path": row["jpg_managed_path"],
         "image_url": f"/api/overlays/{row['id']}/image",
+        "tile_url": (
+            f"/api/overlays/{row['id']}/tiles/{{z}}/{{x}}/{{y}}.png" if has_tiles else None
+        ),
+        "tile_min_zoom": row["tile_anchor_zoom"] if has_tiles else None,
+        "tile_max_zoom": row["tile_max_zoom"] if has_tiles else None,
         "crs": row["crs"],
         "bounds": loads_json(row["bounds_json"], None),
         "width": row["width"],
@@ -117,6 +127,17 @@ def register_overlay_routes(app: FastAPI, cfg: AppConfig, db: Database, storage:
             overlay_id = cursor.lastrowid
             conn.commit()
             row = conn.execute("SELECT * FROM overlays WHERE id = ?", (overlay_id,)).fetchone()
+            # Build the tile pyramid so the map never has to load the full
+            # raster in one piece. Failure is non-fatal: the imageOverlay
+            # fallback still works from jpg_managed_path.
+            try:
+                if overlay_tiles.build_tiles_for_overlay_row(conn, cfg.data_dir, row):
+                    conn.commit()
+                    row = conn.execute(
+                        "SELECT * FROM overlays WHERE id = ?", (overlay_id,)
+                    ).fetchone()
+            except Exception:
+                conn.rollback()
         return row_to_overlay(row)
 
     @app.post("/api/projects/{project_id}/overlay", response_model=OverlayResponse)
@@ -182,3 +203,38 @@ def register_overlay_routes(app: FastAPI, cfg: AppConfig, db: Database, storage:
         if row is None:
             raise HTTPException(status_code=404, detail="Overlay not found")
         return FileResponse(Path(row["jpg_managed_path"]))
+
+    # z/x/y are typed as str because Leaflet's CRS.Simple grid legitimately
+    # produces negative zoom and tile indices, which the int path converter
+    # rejects. Tile URLs embed the overlay id, so long-lived caching is safe
+    # (re-imports create a new overlay row and therefore new URLs).
+    @app.get("/api/overlays/{overlay_id}/tiles/{z}/{x}/{y}.png")
+    def overlay_tile(overlay_id: int, z: str, x: str, y: str) -> Response:
+        try:
+            z_map, x_global, y_global = int(z), int(x), int(y)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid tile address.") from exc
+        with db.connect() as conn:
+            row = conn.execute(
+                "SELECT pmtiles_path, tile_anchor_zoom, tile_anchor_x, tile_anchor_y, tile_max_zoom "
+                "FROM overlays WHERE id = ?",
+                (overlay_id,),
+            ).fetchone()
+        if row is None or not row["pmtiles_path"]:
+            raise HTTPException(status_code=404, detail="Overlay tiles not found")
+        grid = overlay_tiles.TileGrid(
+            anchor_zoom=row["tile_anchor_zoom"],
+            anchor_x=row["tile_anchor_x"],
+            anchor_y=row["tile_anchor_y"],
+            max_zoom=row["tile_max_zoom"],
+        )
+        data = overlay_tiles.read_tile(
+            Path(row["pmtiles_path"]), grid, z_map, x_global, y_global
+        )
+        if data is None:
+            raise HTTPException(status_code=404, detail="Tile not found")
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
