@@ -49,3 +49,76 @@ class OverlayServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OverlayRasterSizeCapTests(unittest.TestCase):
+    def test_pdf_preview_capped_to_gpu_safe_size(self) -> None:
+        import tempfile
+
+        import fitz
+
+        from pano_namer.services.overlay import (
+            MAX_OVERLAY_PIXEL_DIMENSION,
+            _render_pdf_preview,
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            temp_dir = Path(temp)
+            # 100x60 inch sheet: at 150 dpi this would be 15000px wide.
+            document = fitz.open()
+            document.new_page(width=100 * 72, height=60 * 72)
+            pdf_path = temp_dir / "huge_plan.pdf"
+            document.save(pdf_path)
+            document.close()
+
+            _, width, height = _render_pdf_preview(pdf_path, temp_dir / "previews")
+            self.assertLessEqual(max(width, height), MAX_OVERLAY_PIXEL_DIMENSION)
+            self.assertGreater(width, height)
+
+    def test_startup_downscales_existing_oversized_overlay(self) -> None:
+        import tempfile
+
+        from PIL import Image
+
+        from pano_namer.database import Database
+        from pano_namer.services.common import utc_now
+        from pano_namer.services.overlay import (
+            MAX_OVERLAY_PIXEL_DIMENSION,
+            normalize_oversized_overlay_rasters,
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            temp_dir = Path(temp)
+            big_png = temp_dir / "overlay.png"
+            Image.new("RGB", (6000, 3000), color=(200, 210, 220)).save(big_png)
+
+            db = Database(temp_dir / "test.db")
+            db.initialize()
+            with db.connect() as conn:
+                now = utc_now()
+                conn.execute(
+                    "INSERT INTO projects (id, name, storage_root, crs, created_at, updated_at) VALUES (1, 'T', ?, 'EPSG:26912', ?, ?)",
+                    (str(temp_dir), now, now),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO overlays (
+                        project_id, jpg_original_path, jpg_managed_path,
+                        width, height, active, created_at, updated_at
+                    ) VALUES (1, ?, ?, 6000, 3000, 1, ?, ?)
+                    """,
+                    (str(big_png), str(big_png), now, now),
+                )
+                conn.commit()
+
+            fixed = normalize_oversized_overlay_rasters(db)
+            self.assertEqual(fixed, 1)
+            with Image.open(big_png) as image:
+                self.assertLessEqual(max(image.size), MAX_OVERLAY_PIXEL_DIMENSION)
+            with db.connect() as conn:
+                row = conn.execute("SELECT width, height FROM overlays").fetchone()
+            self.assertEqual(row["width"], MAX_OVERLAY_PIXEL_DIMENSION)
+            self.assertEqual(row["height"], MAX_OVERLAY_PIXEL_DIMENSION // 2)
+
+            # Second run is a no-op.
+            self.assertEqual(normalize_oversized_overlay_rasters(db), 0)

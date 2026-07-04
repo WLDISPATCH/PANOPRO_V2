@@ -7,6 +7,12 @@ from uuid import uuid4
 
 from pano_namer.config import FIXED_CRS
 
+# Rasters past this edge length exceed safe GPU texture sizes in the
+# QtWebEngine desktop shell, corrupting the compositor (layers painting
+# over modals, blocky white patches). 4096 is safe on any GPU and plenty
+# for map context.
+MAX_OVERLAY_PIXEL_DIMENSION = 4096
+
 
 def overlay_preview_dir(base_dir: Path) -> Path:
     return (base_dir / "overlay_previews").resolve()
@@ -69,11 +75,61 @@ def _render_pdf_preview(path: Path, preview_dir: Path | None = None) -> tuple[Pa
     document = fitz.open(path)
     try:
         page = document.load_page(0)
-        pixmap = page.get_pixmap(dpi=150, alpha=False)
+        # 150 dpi, but never let either edge exceed the GPU-safe cap —
+        # large-format site plans otherwise render 10k+ pixels wide.
+        scale = 150 / 72
+        max_points = max(page.rect.width, page.rect.height)
+        if max_points * scale > MAX_OVERLAY_PIXEL_DIMENSION:
+            scale = MAX_OVERLAY_PIXEL_DIMENSION / max_points
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         pixmap.save(preview_path)
         return preview_path, pixmap.width, pixmap.height
     finally:
         document.close()
+
+
+def normalize_oversized_overlay_rasters(db) -> int:
+    """Downscale already-imported overlay rasters that exceed the GPU cap.
+
+    Overlays rendered before the size cap existed stay oversized on disk and
+    keep corrupting the desktop compositor; this runs at startup so existing
+    installs heal themselves. Returns the number of overlays downscaled.
+    """
+    from datetime import datetime, timezone
+
+    from PIL import Image
+
+    fixed = 0
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT id, jpg_managed_path FROM overlays WHERE jpg_managed_path IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            path = Path(row["jpg_managed_path"])
+            if not path.exists() or path.suffix.lower() == ".pdf":
+                continue
+            try:
+                with Image.open(path) as image:
+                    width, height = image.size
+                    if max(width, height) <= MAX_OVERLAY_PIXEL_DIMENSION:
+                        continue
+                    scale = MAX_OVERLAY_PIXEL_DIMENSION / max(width, height)
+                    resized = image.resize(
+                        (max(1, int(width * scale)), max(1, int(height * scale))),
+                        Image.LANCZOS,
+                    )
+                    resized.save(path)
+                    new_width, new_height = resized.size
+            except Exception:
+                continue
+            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            conn.execute(
+                "UPDATE overlays SET width = ?, height = ?, updated_at = ? WHERE id = ?",
+                (new_width, new_height, now, row["id"]),
+            )
+            fixed += 1
+        conn.commit()
+    return fixed
 
 
 def parse_overlay_metadata(

@@ -88,6 +88,7 @@ from pano_namer.services.media import content_hash, ensure_thumbnail
 from pano_namer.services.matching import choose_area_match
 from pano_namer.services.photos import read_photo_metadata
 from pano_namer.services import shared_naming
+from pano_namer.services.overlay import normalize_oversized_overlay_rasters
 from pano_namer.services.rename import (
     RenamePlanItem,
     apply_rename_plan,
@@ -848,6 +849,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     db = Database(cfg.db_path)
     db.initialize()
     storage = StorageService(cfg)
+    try:
+        normalize_oversized_overlay_rasters(db)
+    except Exception:  # pragma: no cover - startup must not fail on cleanup
+        pass
 
     app = FastAPI(title="PANO PRO", version=__version__)
     app.add_middleware(
