@@ -624,8 +624,9 @@ button.secondary,
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(20, 39, 63, 0.38);
-  backdrop-filter: blur(4px);
+  /* No backdrop-filter: blurring the map behind full-screen overlays causes
+     blocky repaint artifacts in the QtWebEngine desktop shell. */
+  background: rgba(20, 39, 63, 0.52);
   z-index: 50;
 }
 
@@ -1788,8 +1789,7 @@ button:disabled:hover {
 .app-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(20, 39, 63, 0.42);
-  backdrop-filter: blur(4px);
+  background: rgba(20, 39, 63, 0.55);
 }
 
 .app-modal-card {
@@ -2063,8 +2063,7 @@ button:disabled:hover {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(238, 244, 248, 0.66);
-  backdrop-filter: blur(2px);
+  background: rgba(238, 244, 248, 0.85);
   border-radius: 18px;
   z-index: 500;
   pointer-events: none;
