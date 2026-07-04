@@ -65,6 +65,26 @@ class AreaSyncSummary(BaseModel):
     tombstoned: int = 0
     skipped: int = 0
 
+
+class GlobalAreaSyncRequest(BaseModel):
+    project_id: int | None = None
+
+
+class GlobalAreaSyncSummary(BaseModel):
+    ok: bool
+    error: str | None = None
+    templates_created: int = 0
+    created_names: list[str] = Field(default_factory=list)
+    templates_synced: int = 0
+    errors: list[str] = Field(default_factory=list)
+    pulled_new: int = 0
+    pulled_updated: int = 0
+    pushed_new: int = 0
+    pushed_updated: int = 0
+    deactivated: int = 0
+    tombstoned: int = 0
+    skipped: int = 0
+
     @property
     def changed(self) -> int:  # pragma: no cover - convenience only
         return self.pulled_new + self.pulled_updated + self.deactivated
@@ -350,6 +370,70 @@ class RenameRunResponse(BaseModel):
 
 PhotoImportResult.model_rebuild()
 PhotoImportResponse.model_rebuild()
+
+
+class SmartSettingsPayload(BaseModel):
+    ui_mode: str | None = None
+    import_base_path: str | None = None
+    archive_base_path: str | None = None
+    ftp_host: str | None = None
+    ftp_port: int | None = None
+    ftp_username: str | None = None
+    ftp_password: str | None = None
+    ftp_remote_path: str | None = None
+    ftp_protocol: str | None = None
+
+
+class SmartSettingsResponse(BaseModel):
+    ui_mode: str
+    import_base_path: str
+    archive_base_path: str
+    ftp_host: str
+    ftp_port: int
+    ftp_username: str
+    ftp_password: str
+    ftp_remote_path: str
+    ftp_protocol: str
+
+
+class SmartDrivesResponse(BaseModel):
+    drives: list[str] = Field(default_factory=list)
+
+
+class SmartImportRequest(BaseModel):
+    project_id: int
+    source_path: str | None = None
+
+
+class SmartImportResponse(BaseModel):
+    source_path: str
+    panos_found: int
+    normal_skipped: int
+    unreadable_skipped: int
+    duplicates_skipped: int
+    copied: int
+    already_copied: int
+    staged: int
+    registry_checked: bool
+    import_summary: dict[str, int]
+
+
+class SmartExportRequest(BaseModel):
+    project_id: int
+
+
+class SmartExportResponse(BaseModel):
+    renamed: int
+    registered: int
+    uploaded: int
+    archived: int
+    failed: int
+    errors: list[str] = Field(default_factory=list)
+
+
+class SmartFtpTestResponse(BaseModel):
+    ok: bool
+    error: str | None = None
 
 
 class MapDataResponse(BaseModel):

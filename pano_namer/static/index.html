@@ -28,27 +28,12 @@
         <button class="tab" data-tab="completed" type="button">Completed</button>
         <button class="tab" data-tab="system" type="button">System</button>
       </nav>
+      <div class="sidebar-mode-toggle">
+        <button id="mode-toggle-button" class="mode-toggle-pill" type="button" title="Switch between Smart and Advanced mode">Switch to Smart Mode</button>
+      </div>
     </aside>
 
     <div class="workspace">
-      <header class="topbar">
-        <div class="topbar-title">
-          <img src="/static/logo.svg" alt="" class="topbar-mark" aria-hidden="true">
-          <div>
-            <p class="eyebrow">Operations Command</p>
-            <h2>Project workspace</h2>
-          </div>
-        </div>
-        <section class="toolbar" aria-label="Project status and controls">
-          <label>
-            <span>Current Template</span>
-            <select id="project-select"></select>
-          </label>
-          <button id="refresh-button" class="secondary" type="button">Refresh</button>
-          <div id="status-pill" class="status-pill">No template selected</div>
-        </section>
-      </header>
-
       <main class="content">
 
       <!-- ================= SETUP ================= -->
@@ -61,20 +46,6 @@
           </div>
         </div>
         <div class="panel-stack">
-          <section class="subsection">
-            <div class="subsection-head">
-              <h3>Template</h3>
-              <p>Create a new template or remove the current one.</p>
-            </div>
-            <div class="setup-template-row">
-              <form id="project-form" class="project-form">
-                <input id="project-name" type="text" placeholder="New template name" required>
-                <button type="submit">Create Template</button>
-              </form>
-              <button id="delete-project-button" class="danger secondary" type="button">Delete Template</button>
-            </div>
-          </section>
-
           <section class="subsection">
             <div class="subsection-head">
               <h3>Areas</h3>
@@ -186,17 +157,6 @@
               <span>Search</span>
               <input id="pending-search" type="search" placeholder="Filename or area">
             </label>
-            <label>
-              <span>Sort</span>
-              <select id="photo-sort">
-                <option value="date_desc">Date Taken: Newest</option>
-                <option value="date_asc">Date Taken: Oldest</option>
-                <option value="original_asc">Original Name: A-Z</option>
-                <option value="original_desc">Original Name: Z-A</option>
-                <option value="proposed_asc">Proposed Name: A-Z</option>
-                <option value="proposed_desc">Proposed Name: Z-A</option>
-              </select>
-            </label>
             <div class="pending-column-toggles">
               <label class="toggle-chip">
                 <input id="pending-show-original-toggle" type="checkbox" checked>
@@ -235,7 +195,6 @@
         <div class="process-actionbar">
           <button id="rename-button" type="button">Rename &amp; Export Eligible Photos</button>
           <div class="process-actionbar-spacer"></div>
-          <button id="rollback-button" class="secondary" type="button">Rollback Last Run</button>
           <button id="process-runs-toggle" class="secondary" type="button">Recent Runs ▾</button>
         </div>
 
@@ -243,6 +202,9 @@
           <div class="subsection-head">
             <h3>Rename Runs</h3>
             <p>Audit trail of applied rename batches.</p>
+            <div class="panel-actions">
+              <button id="rollback-button" class="secondary" type="button">Rollback Last Run</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -266,14 +228,17 @@
       <section class="panel review-hub-panel" data-panel="review">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Review Workspace</p>
-            <h2>Review</h2>
-            <p>One workspace for spatial review, 360 inspection, and bulk review.</p>
+            <p class="eyebrow" id="review-eyebrow">Review Workspace</p>
+            <h2 id="review-title">Review</h2>
+            <p id="review-description">One workspace for spatial review and 360 inspection.</p>
+          </div>
+          <div class="smart-actionbar" id="smart-actionbar">
+            <button id="smart-import-button" type="button">Smart Import</button>
+            <button id="smart-export-button" type="button">Smart Export</button>
           </div>
           <div class="mode-switch" role="tablist" aria-label="Review mode">
             <button class="mode-button active" data-review-mode="map" type="button">Map</button>
             <button class="mode-button" data-review-mode="viewer" type="button">Viewer</button>
-            <button class="mode-button" data-review-mode="bulk" type="button">Bulk Review</button>
           </div>
         </div>
 
@@ -390,7 +355,6 @@
                 <div id="viewer-details-body" class="viewer-detail-grid"></div>
                 <div class="detail-actions viewer-detail-actions">
                   <button id="viewer-open-map-button" class="secondary" type="button">Open Map</button>
-                  <button id="viewer-open-review-button" class="secondary" type="button">Open Bulk Review</button>
                 </div>
               </section>
               <section class="viewer-card orientation-card">
@@ -444,34 +408,6 @@
           </div>
         </div>
 
-        <!-- ---- Bulk review mode ---- -->
-        <div class="mode-section" data-review-section="bulk">
-          <div class="subsection-head">
-            <h3>Bulk Review</h3>
-            <p>Review archived panos quickly with next/previous navigation and quick actions.</p>
-            <div class="panel-actions">
-              <button id="review-mark-button" type="button">Mark Reviewed</button>
-              <button id="review-archive-button" type="button">Archive to Folder</button>
-              <button id="review-add-to-collection-button" type="button">Add to Collection</button>
-            </div>
-          </div>
-          <div class="viewer-layout">
-            <div class="viewer-shell viewer-shell-compact">
-              <canvas id="review-viewer-canvas" class="viewer-canvas"></canvas>
-              <div id="review-viewer-overlay" class="viewer-overlay"></div>
-              <div class="viewer-nav">
-                <button id="review-prev-button" class="secondary" type="button">Previous</button>
-                <button id="review-next-button" class="secondary" type="button">Next</button>
-              </div>
-            </div>
-            <aside class="viewer-sidebar">
-              <section class="viewer-card">
-                <h3>Queue</h3>
-                <div id="review-queue-list" class="stack-list compact"></div>
-              </section>
-            </aside>
-          </div>
-        </div>
       </section>
 
       <!-- ================= COMPLETED ================= -->
@@ -614,6 +550,23 @@
         <div class="mode-section active" data-system-section="settings">
           <div class="troubleshoot-grid">
             <section class="troubleshoot-card">
+              <h3>Template</h3>
+              <p class="muted">Create, select, refresh, or delete the active project template.</p>
+              <label class="settings-field">
+                <span>Current Template</span>
+                <select id="project-select"></select>
+              </label>
+              <form id="project-form" class="project-form">
+                <input id="project-name" type="text" placeholder="New template name" required>
+                <button type="submit">Create Template</button>
+              </form>
+              <div class="detail-actions">
+                <button id="refresh-button" class="secondary" type="button">Refresh</button>
+                <button id="delete-project-button" class="danger secondary" type="button">Delete Template</button>
+              </div>
+              <div id="status-pill" class="troubleshoot-copy muted">No template selected</div>
+            </section>
+            <section class="troubleshoot-card">
               <h3>Shared Pano Naming</h3>
               <p class="muted">Share rename numbering with other computers through Supabase so two machines never create the same pano name. Photos and project data stay local.</p>
               <label class="settings-field settings-field-inline">
@@ -636,22 +589,61 @@
                 <input id="shared-naming-sync-areas" type="checkbox">
                 <span>Sync areas between computers</span>
               </label>
-              <p class="muted settings-hint">Area files (DXF/KML, including drawn areas) upload to Supabase Storage; templates with the same name stay in sync on every computer. Photos and overlays never sync.</p>
               <div class="detail-actions">
                 <button id="shared-naming-save-button" type="button">Save Settings</button>
                 <button id="shared-naming-test-button" class="secondary" type="button">Test Connection</button>
                 <button id="area-sync-now-button" class="secondary" type="button">Sync Areas Now</button>
+                <button id="shared-naming-backfill-button" class="secondary" type="button">Scan &amp; Add Existing Names</button>
               </div>
               <div id="shared-naming-status" class="troubleshoot-copy muted">Loading shared naming settings.</div>
               <div id="area-sync-result" class="troubleshoot-copy muted">No area sync run yet.</div>
+              <div id="shared-naming-backfill-result" class="troubleshoot-copy muted">No scan run yet.</div>
             </section>
             <section class="troubleshoot-card">
-              <h3>Shared Registry</h3>
-              <p class="muted">Add this template's already-named panos (like 260702_OPTA_045) to the shared registry so numbering continues after them.</p>
+              <h3>Smart Mode</h3>
+              <p class="muted">Smart Import copies new panos from the SD card into a dated folder. Smart Export renames them, uploads to the server, then moves them to the export end location.</p>
+              <label class="settings-field">
+                <span>Import folder (SD copies)</span>
+                <input id="smart-import-base" type="text" placeholder="D:\Panos" autocomplete="off">
+              </label>
+              <label class="settings-field">
+                <span>Export end location (archive)</span>
+                <input id="smart-archive-base" type="text" placeholder="D:\PanoArchive" autocomplete="off">
+              </label>
+              <h4 class="settings-subhead">Upload server</h4>
+              <label class="settings-field">
+                <span>Protocol</span>
+                <select id="smart-ftp-protocol">
+                  <option value="ftp">FTP</option>
+                  <option value="ftps">FTPS (TLS)</option>
+                  <option value="sftp">SFTP (SSH)</option>
+                </select>
+              </label>
+              <label class="settings-field">
+                <span>Host</span>
+                <input id="smart-ftp-host" type="text" placeholder="ftp.example.com" autocomplete="off">
+              </label>
+              <label class="settings-field">
+                <span>Port (blank = default)</span>
+                <input id="smart-ftp-port" type="number" min="1" max="65535" placeholder="21 (FTP/FTPS) or 22 (SFTP)">
+              </label>
+              <label class="settings-field">
+                <span>Username</span>
+                <input id="smart-ftp-username" type="text" autocomplete="off">
+              </label>
+              <label class="settings-field">
+                <span>Password</span>
+                <input id="smart-ftp-password" type="password" autocomplete="off">
+              </label>
+              <label class="settings-field">
+                <span>Server folder</span>
+                <input id="smart-ftp-remote-path" type="text" placeholder="/panos" autocomplete="off">
+              </label>
               <div class="detail-actions">
-                <button id="shared-naming-backfill-button" class="secondary" type="button">Scan &amp; Add Existing Names</button>
+                <button id="smart-settings-save-button" type="button">Save Settings</button>
+                <button id="smart-ftp-test-button" class="secondary" type="button">Test Connection</button>
               </div>
-              <div id="shared-naming-backfill-result" class="troubleshoot-copy muted">No scan run yet.</div>
+              <div id="smart-settings-status" class="troubleshoot-copy muted">Loading Smart Mode settings.</div>
             </section>
           </div>
         </div>
@@ -741,6 +733,21 @@
         <button id="app-modal-primary-button" type="submit">Continue</button>
       </div>
     </form>
+  </div>
+
+  <div id="smart-progress-modal" class="app-modal" hidden>
+    <div class="app-modal-backdrop"></div>
+    <div class="app-modal-card" role="dialog" aria-modal="true" aria-labelledby="smart-progress-title">
+      <div class="app-modal-head">
+        <p class="eyebrow">Smart Mode</p>
+        <h2 id="smart-progress-title">Smart Import</h2>
+        <p id="smart-progress-summary">Working…</p>
+      </div>
+      <ul id="smart-progress-steps" class="smart-progress-steps"></ul>
+      <div class="app-modal-actions">
+        <button id="smart-progress-close-button" type="button" disabled>Close</button>
+      </div>
+    </div>
   </div>
 
   <div id="busy-overlay" class="busy-overlay" hidden>

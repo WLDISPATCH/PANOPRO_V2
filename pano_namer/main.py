@@ -17,6 +17,7 @@ from pano_namer.api.routes.areas import register_area_routes
 from pano_namer.api.routes.overlays import register_overlay_routes
 from pano_namer.api.routes.projects import register_project_routes
 from pano_namer.api.routes.settings import register_settings_routes
+from pano_namer.api.routes.smart import register_smart_routes
 from pano_namer.api.routes.system import register_system_routes
 from pano_namer.api.routes.site_insight import register_site_insight_routes
 from pano_namer import __version__
@@ -1371,6 +1372,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 raise
 
         return row_to_rename_run(row)
+
+    register_smart_routes(app, db, import_photo_paths, run_rename)
 
     @app.post(
         "/api/projects/{project_id}/rename-runs/{run_id}/rollback",

@@ -8,6 +8,8 @@ from fastapi import FastAPI, HTTPException
 from pano_namer.database import Database
 from pano_namer.schemas import (
     AreaSyncSummary,
+    GlobalAreaSyncRequest,
+    GlobalAreaSyncSummary,
     SharedNamingBackfillResponse,
     SharedNamingPreviewResponse,
     SharedNamingSettingsPayload,
@@ -63,6 +65,10 @@ def register_settings_routes(app: FastAPI, db: Database, storage: StorageService
     )
     def run_area_sync_route(project_id: int) -> dict[str, Any]:
         return area_sync.run_area_sync(db, storage, project_id)
+
+    @app.post("/api/area-sync/run", response_model=GlobalAreaSyncSummary)
+    def run_global_area_sync_route(payload: GlobalAreaSyncRequest) -> dict[str, Any]:
+        return area_sync.run_global_area_sync(db, storage, payload.project_id)
 
     @app.post(
         "/api/settings/shared-naming/test", response_model=SharedNamingTestResponse
