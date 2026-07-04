@@ -876,11 +876,17 @@ async function refreshProjectData() {
   state.savedFilters = savedFilters;
   state.duplicatePairs = duplicatePairs;
   state.auditEvents = auditEvents;
-  if (state.currentCollectionId && state.collections.some((item) => item.id === state.currentCollectionId)) {
-    state.collectionDetail = await api(`/api/collections/${state.currentCollectionId}/detail`);
-  } else {
-    state.currentCollectionId = state.collections[0]?.id || null;
-    state.collectionDetail = state.currentCollectionId ? await api(`/api/collections/${state.currentCollectionId}/detail`) : null;
+  // A failed collection-detail fetch must never abort the refresh — that
+  // would leave the whole UI unrendered (empty tables, "v-" badge).
+  try {
+    if (!state.currentCollectionId || !state.collections.some((item) => item.id === state.currentCollectionId)) {
+      state.currentCollectionId = state.collections[0]?.id || null;
+    }
+    state.collectionDetail = state.currentCollectionId
+      ? await api(`/api/collections/${state.currentCollectionId}/detail`)
+      : null;
+  } catch (_error) {
+    state.collectionDetail = null;
   }
   state.mapData = null;
   state.mapDataLoading = true;

@@ -576,6 +576,45 @@ def _migrate_smart_mode(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_purge_orphaned_photo_rows(conn: sqlite3.Connection) -> None:
+    """Remove rows referencing deleted photos.
+
+    Cascades never fired historically because connections did not enable
+    PRAGMA foreign_keys, so photo deletions left orphans behind. Those
+    orphans break collection detail lookups (GitHub crash-on-reload bug).
+    """
+    photo_ref_tables = (
+        ("collection_items", "photo_id"),
+        ("pano_tags", "photo_id"),
+        ("pano_annotations", "photo_id"),
+        ("pano_notes", "photo_id"),
+        ("pano_issues", "photo_id"),
+        ("pano_hotspots", "photo_id"),
+        ("pano_hotspots", "target_photo_id"),
+        ("pano_view_state", "photo_id"),
+        ("pano_thumbnails", "photo_id"),
+        ("archived_panos", "photo_id"),
+        ("pano_duplicates", "photo_id"),
+        ("pano_duplicates", "duplicate_photo_id"),
+        ("filename_reservations", "photo_id"),
+    )
+    for table, column in photo_ref_tables:
+        conn.execute(
+            f"""
+            DELETE FROM {table}
+            WHERE {column} IS NOT NULL
+              AND {column} NOT IN (SELECT id FROM photos)
+            """
+        )
+    conn.execute(
+        """
+        UPDATE collections SET cover_photo_id = NULL
+        WHERE cover_photo_id IS NOT NULL
+          AND cover_photo_id NOT IN (SELECT id FROM photos)
+        """
+    )
+
+
 def _migrate_overlay_display_name(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "overlays")
     if "display_name" not in columns:
@@ -610,6 +649,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     ("20260702_0010_area_sync_uid", _migrate_area_sync_uid),
     ("20260703_0011_overlay_display_name", _migrate_overlay_display_name),
     ("20260703_0012_smart_mode", _migrate_smart_mode),
+    ("20260704_0013_purge_orphaned_photo_rows", _migrate_purge_orphaned_photo_rows),
 )
 
 
@@ -647,6 +687,10 @@ class Database:
     def connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
+        # SQLite enforces foreign keys (and ON DELETE CASCADE) per connection;
+        # without this, deleting photos strands rows in collection_items,
+        # pano_tags, etc., which later breaks endpoints that resolve photo ids.
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
         finally:
