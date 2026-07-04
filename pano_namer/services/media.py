@@ -5,6 +5,12 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
+# Stitched 360 panos (e.g. DJI M4E at 14400x7200 = ~104M pixels) exceed
+# Pillow's default ~89.5M-pixel decompression-bomb guard, which crashes
+# thumbnail generation. The app only opens local drone imagery the user
+# imported, not untrusted downloads, so lift the cap.
+Image.MAX_IMAGE_PIXELS = None
+
 
 def content_hash(path: Path, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.sha1()
