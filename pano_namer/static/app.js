@@ -85,7 +85,6 @@ const elements = {
   deleteProjectButton: document.getElementById("delete-project-button"),
   overlayImportButton: document.getElementById("overlay-import-button"),
   overlayWorkspace: document.getElementById("overlay-workspace"),
-  overlayEmptyState: document.getElementById("overlay-empty-state"),
   overlayLibraryCard: document.getElementById("overlay-library-card"),
   overlayCardTitle: document.getElementById("overlay-card-title"),
   overlayCardNote: document.getElementById("overlay-card-note"),
@@ -1132,29 +1131,8 @@ function renderOverlayLibrary() {
   const status = overlayStatus();
 
   elements.overlayImportButton.disabled = !hasTemplate;
-
-  elements.overlayEmptyState.hidden = hasOverlay;
   elements.overlayLibraryCard.hidden = !hasOverlay;
-
-  if (!hasTemplate) {
-    elements.overlayEmptyState.innerHTML = `
-      <div>
-        <p class="eyebrow">Overlay Workspace</p>
-        <h3>Create a template first.</h3>
-        <p>Select or create a template before importing a site map overlay.</p>
-      </div>
-    `;
-    return;
-  }
-
-  if (!hasOverlay) {
-    elements.overlayEmptyState.innerHTML = `
-      <div>
-        <p class="eyebrow">Overlay Workspace</p>
-        <h3>No overlay loaded yet.</h3>
-        <p>Use Add Overlay to import a PDF or supported overlay file for map context.</p>
-      </div>
-    `;
+  if (!hasTemplate || !hasOverlay) {
     return;
   }
 
