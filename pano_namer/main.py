@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import json
 import math
 import os
+import queue
 import sqlite3
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 
@@ -86,7 +89,12 @@ from pano_namer.schemas import (
 )
 from pano_namer.services.common import dumps_json, ensure_path, loads_json, utc_now
 from pano_namer.services.dxf import build_manual_polygon_wkt, extract_area_geometry_wkt
-from pano_namer.services.media import content_hash, ensure_thumbnail, prepare_thumbnail
+from pano_namer.services.media import (
+    content_hash,
+    ensure_thumbnail,
+    ensure_viewer_image,
+    prepare_thumbnail,
+)
 from pano_namer.services.matching import choose_area_match
 from pano_namer.services.photos import read_photo_metadata
 from pano_namer.services import overlay_tiles, shared_naming
@@ -107,6 +115,7 @@ from pano_namer.services.site_insight_uploads import SiteInsightSettings
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 THUMBNAIL_DIR_NAME = "thumbnails"
+VIEWER_CACHE_DIR_NAME = "viewer_cache"
 
 
 def safe_upload_name(filename: str | None) -> str:
@@ -344,6 +353,12 @@ def build_rename_summary(results: list[dict[str, Any]]) -> dict[str, int]:
 
 def thumbnail_dir(cfg: AppConfig) -> Path:
     path = cfg.data_dir / THUMBNAIL_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def viewer_cache_dir(cfg: AppConfig) -> Path:
+    path = cfg.data_dir / VIEWER_CACHE_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -696,6 +711,7 @@ def photo_detail_payload(
     return {
         **photo,
         "image_url": f"/api/photos/{photo_id}/image",
+        "viewer_image_url": f"/api/photos/{photo_id}/viewer-image",
         "thumbnail_url": thumb["url"] if thumb else None,
         "thumbnail_width": thumb["width"] if thumb else None,
         "thumbnail_height": thumb["height"] if thumb else None,
@@ -734,39 +750,64 @@ def resolve_area_color(
     return next_available_area_color(existing_colors)
 
 
-def expand_photo_sources(raw_paths: list[str]) -> tuple[list[Path], int]:
-    """Expand files/folders into importable photo paths.
+def expand_photo_sources_events(raw_paths: list[str]):
+    """Expand files/folders into importable photo paths, yielding progress.
 
     Folder (batch) expansion only accepts stitched 360 panos: DJI cards keep
     the raw stitch tiles in PANORAMA subfolders, and recursing a card or
     mission folder used to sweep those in alongside the stitched output.
-    Explicitly selected files are trusted as-is. Returns the paths plus how
-    many non-pano files were skipped so the summary can report it.
+    Explicitly selected files are trusted as-is. Yields throttled
+    {"type": "scan", scanned, total, accepted} events for folder candidates,
+    then {"type": "result", "paths": [...], "skipped_non_pano": n}.
     """
     from pano_namer.services.sd_card import is_stitched_pano
 
-    expanded: list[Path] = []
-    seen: set[Path] = set()
-    skipped_non_pano = 0
+    # Enumerate first so scan progress has a total.
+    entries: list[tuple[Path, bool]] = []  # (path, from_folder)
     for raw_path in raw_paths:
         source_path = ensure_path(raw_path)
         if source_path.is_dir():
             for child in sorted(source_path.rglob("*")):
-                if (
-                    not child.is_file()
-                    or child.suffix.lower() not in PHOTO_EXTENSIONS
-                    or child in seen
-                ):
-                    continue
-                if not is_stitched_pano(child):
-                    skipped_non_pano += 1
-                    continue
-                expanded.append(child.resolve())
-                seen.add(child.resolve())
-        elif source_path.suffix.lower() in PHOTO_EXTENSIONS and source_path not in seen:
-            expanded.append(source_path)
-            seen.add(source_path)
-    return expanded, skipped_non_pano
+                if child.is_file() and child.suffix.lower() in PHOTO_EXTENSIONS:
+                    entries.append((child, True))
+        elif source_path.suffix.lower() in PHOTO_EXTENSIONS:
+            entries.append((source_path, False))
+
+    expanded: list[Path] = []
+    seen: set[Path] = set()
+    skipped_non_pano = 0
+    total = sum(1 for _, from_folder in entries if from_folder)
+    scanned = 0
+    for path, from_folder in entries:
+        resolved = path.resolve() if from_folder else path
+        if resolved in seen or path in seen:
+            continue
+        if from_folder:
+            scanned += 1
+            if not is_stitched_pano(path):
+                skipped_non_pano += 1
+            else:
+                expanded.append(resolved)
+                seen.add(resolved)
+            if scanned % 5 == 0 or scanned == total:
+                yield {
+                    "type": "scan",
+                    "scanned": scanned,
+                    "total": total,
+                    "accepted": len(expanded),
+                }
+        else:
+            expanded.append(path)
+            seen.add(path)
+    yield {"type": "result", "paths": expanded, "skipped_non_pano": skipped_non_pano}
+
+
+def expand_photo_sources(raw_paths: list[str]) -> tuple[list[Path], int]:
+    """Non-streaming wrapper over expand_photo_sources_events."""
+    for event in expand_photo_sources_events(raw_paths):
+        if event["type"] == "result":
+            return event["paths"], event["skipped_non_pano"]
+    return [], 0
 
 
 def refresh_pending_photo_matches(conn: sqlite3.Connection, project_id: int) -> None:
@@ -938,7 +979,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             ).fetchall()
         return [row_to_photo(row) for row in rows]
 
-    def import_photo_paths(project_id: int, paths: list[Path]) -> dict[str, Any]:
+    def import_photo_paths(
+        project_id: int,
+        paths: list[Path],
+        progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, Any]:
         created_ids: list[int] = []
         import_results: list[dict[str, Any]] = []
         with db.connect() as conn:
@@ -965,6 +1010,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     prep_indices, executor.map(prepare_photo_import, prep_paths)
                 ):
                     prepared_by_index[index] = prepared
+                    if progress is not None:
+                        progress(len(prepared_by_index), len(prep_indices))
 
         with db.connect() as conn:
             fetch_project(conn, project_id)
@@ -1131,6 +1178,75 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         result = import_photo_paths(project_id, paths)
         result["summary"]["non_pano_skipped"] = skipped_non_pano
         return result
+
+    @app.post("/api/projects/{project_id}/photos/import/stream")
+    def import_photos_stream(
+        project_id: int, payload: PhotoImportRequest
+    ) -> StreamingResponse:
+        # Validate before streaming: guards must be real HTTP errors.
+        with db.connect() as conn:
+            fetch_project(conn, project_id)
+
+        def ndjson():
+            try:
+                paths: list[Path] = []
+                skipped_non_pano = 0
+                for event in expand_photo_sources_events(payload.paths):
+                    if event["type"] == "result":
+                        paths = event["paths"]
+                        skipped_non_pano = event["skipped_non_pano"]
+                    else:
+                        yield json.dumps(
+                            {
+                                "stage": "scan",
+                                "scanned": event["scanned"],
+                                "total": event["total"],
+                                "accepted": event["accepted"],
+                            }
+                        ) + "\n"
+
+                # import_photo_paths reports prep progress via callback; a
+                # queue bridges those callbacks into this generator.
+                events: queue.Queue = queue.Queue()
+                outcome: dict[str, Any] = {}
+
+                def emit_progress(done: int, total: int) -> None:
+                    if done % 3 == 0 or done == total:
+                        events.put(
+                            {"stage": "import", "processed": done, "total": total}
+                        )
+
+                def worker() -> None:
+                    try:
+                        outcome["result"] = import_photo_paths(
+                            project_id, paths, progress=emit_progress
+                        )
+                    except Exception as exc:
+                        outcome["error"] = str(exc)
+                    finally:
+                        events.put(None)
+
+                thread = threading.Thread(target=worker, daemon=True)
+                thread.start()
+                while True:
+                    item = events.get()
+                    if item is None:
+                        break
+                    yield json.dumps(item) + "\n"
+                thread.join()
+
+                if "error" in outcome:
+                    yield json.dumps(
+                        {"stage": "error", "detail": outcome["error"]}
+                    ) + "\n"
+                    return
+                summary = outcome["result"]["summary"]
+                summary["non_pano_skipped"] = skipped_non_pano
+                yield json.dumps({"stage": "done", "summary": summary}) + "\n"
+            except Exception as exc:  # headers already sent; surface as event
+                yield json.dumps({"stage": "error", "detail": str(exc)}) + "\n"
+
+        return StreamingResponse(ndjson(), media_type="application/x-ndjson")
 
     @app.post(
         "/api/projects/{project_id}/photos/upload", response_model=PhotoImportResponse
@@ -1670,6 +1786,25 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if not path.exists():
             raise HTTPException(status_code=404, detail="Photo file not found")
         return FileResponse(path)
+
+    @app.get("/api/photos/{photo_id}/viewer-image")
+    def photo_viewer_image(photo_id: int) -> FileResponse:
+        with db.connect() as conn:
+            row = conn.execute(
+                "SELECT original_path FROM photos WHERE id = ?", (photo_id,)
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Photo not found")
+        path = Path(row["original_path"])
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Photo file not found")
+        try:
+            served = ensure_viewer_image(path, viewer_cache_dir(cfg), photo_id)
+        except Exception:
+            served = path
+        return FileResponse(
+            served, headers={"Cache-Control": "public, max-age=86400"}
+        )
 
     @app.get("/api/photos/{photo_id}/thumbnail")
     def photo_thumbnail(photo_id: int) -> FileResponse:

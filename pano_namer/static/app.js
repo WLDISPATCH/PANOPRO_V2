@@ -45,10 +45,11 @@ const state = {
   currentArchiveFolderId: null,
   currentCollectionId: null,
   viewerPayload: null,
-  viewerImageCache: {},
   viewerContext: { source: "viewer", collectionId: null },
-  viewerPose: null,
-  viewerDrag: null,
+  // Photo Sphere Viewer handles (lazily mounted), and a pending click-to-place
+  // request armed by Add Annotation/Issue/Hotspot until the next pano click.
+  viewer360: { viewer: null, collection: null },
+  placementMode: null,
   pendingView: {
     sortBy: "date_desc",
     search: "",
@@ -85,7 +86,6 @@ const elements = {
   deleteProjectButton: document.getElementById("delete-project-button"),
   overlayImportButton: document.getElementById("overlay-import-button"),
   overlayWorkspace: document.getElementById("overlay-workspace"),
-  overlayEmptyState: document.getElementById("overlay-empty-state"),
   overlayLibraryCard: document.getElementById("overlay-library-card"),
   overlayCardTitle: document.getElementById("overlay-card-title"),
   overlayCardNote: document.getElementById("overlay-card-note"),
@@ -176,10 +176,8 @@ const elements = {
   collectionsList: document.getElementById("collections-list"),
   collectionMapSvg: document.getElementById("collection-map-svg"),
   collectionPhotosTable: document.getElementById("collection-photos-table"),
-  collectionViewerCanvas: document.getElementById("collection-viewer-canvas"),
-  collectionViewerOverlay: document.getElementById("collection-viewer-overlay"),
-  viewerCanvas: document.getElementById("viewer-canvas"),
-  viewerOverlay: document.getElementById("viewer-overlay"),
+  viewer360Container: document.getElementById("viewer-360"),
+  collectionViewer360Container: document.getElementById("collection-viewer-360"),
   viewerSelectedName: document.getElementById("viewer-selected-name"),
   viewerSelectedState: document.getElementById("viewer-selected-state"),
   viewerAreaName: document.getElementById("viewer-area-name"),
@@ -1132,29 +1130,8 @@ function renderOverlayLibrary() {
   const status = overlayStatus();
 
   elements.overlayImportButton.disabled = !hasTemplate;
-
-  elements.overlayEmptyState.hidden = hasOverlay;
   elements.overlayLibraryCard.hidden = !hasOverlay;
-
-  if (!hasTemplate) {
-    elements.overlayEmptyState.innerHTML = `
-      <div>
-        <p class="eyebrow">Overlay Workspace</p>
-        <h3>Create a template first.</h3>
-        <p>Select or create a template before importing a site map overlay.</p>
-      </div>
-    `;
-    return;
-  }
-
-  if (!hasOverlay) {
-    elements.overlayEmptyState.innerHTML = `
-      <div>
-        <p class="eyebrow">Overlay Workspace</p>
-        <h3>No overlay loaded yet.</h3>
-        <p>Use Add Overlay to import a PDF or supported overlay file for map context.</p>
-      </div>
-    `;
+  if (!hasTemplate || !hasOverlay) {
     return;
   }
 
@@ -1382,6 +1359,7 @@ function renderPhotos() {
     cells.push(`
       <td>
         <div class="inline-actions queue-actions">
+          <button class="secondary" type="button" data-action="view-360" data-photo-id="${photo.id}">View 360</button>
           <button class="secondary" type="button" data-action="view-map" data-photo-id="${photo.id}">View on Map</button>
           <button class="danger subtle-danger" type="button" data-action="remove-photo" data-photo-id="${photo.id}">Remove</button>
         </div>
@@ -1523,7 +1501,6 @@ function renderCollections() {
   if (!detail) {
     elements.collectionPhotosTable.innerHTML = `<tr><td colspan="4">Select or create a collection.</td></tr>`;
     elements.collectionMapSvg.innerHTML = "";
-    clearViewerCanvas(elements.collectionViewerCanvas, elements.collectionViewerOverlay, "No collection selected.");
     return;
   }
   elements.collectionPhotosTable.innerHTML = detail.photos.map((photo) => `
@@ -1570,53 +1547,134 @@ function viewerPhoto() {
   return state.viewerPayload?.photo || null;
 }
 
-function currentViewerPose(photo = viewerPhoto()) {
-  if (!photo) {
-    return { yaw: 0, pitch: 0, fov: 75 };
-  }
-  if (state.viewerPose && state.viewerPose.photoId === photo.id) {
-    return state.viewerPose;
-  }
+function poseDefaults(photo) {
+  if (!photo) return { yaw: 0, pitch: 0, fov: 75, northOffset: 0 };
   return {
-    photoId: photo.id,
     yaw: Number(photo.viewer_state?.default_yaw || 0),
     pitch: Number(photo.viewer_state?.default_pitch || 0),
     fov: Number(photo.viewer_state?.default_fov || 75),
+    northOffset: Number(photo.viewer_state?.north_offset || 0),
   };
 }
 
-function normalizeYaw(value) {
-  let yaw = Number(value || 0);
-  while (yaw <= -180) yaw += 360;
-  while (yaw > 180) yaw -= 360;
-  return yaw;
+// Build the Photo Sphere Viewer marker list from the payload. Hotspots carry
+// their target photo id so a marker click navigates pano-to-pano; annotations
+// and issues are review call-outs.
+function markersForPayload(payload) {
+  const markers = [];
+  for (const hotspot of payload.hotspots || []) {
+    if (hotspot.disabled) continue;
+    markers.push({
+      id: `hotspot-${hotspot.id}`,
+      kind: "hotspot",
+      yaw: hotspot.yaw,
+      pitch: hotspot.pitch,
+      tooltip: hotspot.label || `Pano ${hotspot.target_photo_id}`,
+      targetPhotoId: hotspot.target_photo_id,
+      refId: hotspot.id,
+    });
+  }
+  for (const annotation of payload.annotations || []) {
+    markers.push({
+      id: `annotation-${annotation.id}`,
+      kind: "annotation",
+      yaw: annotation.yaw,
+      pitch: annotation.pitch,
+      tooltip: annotation.label || "Annotation",
+      color: annotation.style?.color,
+      refId: annotation.id,
+    });
+  }
+  for (const issue of payload.issues || []) {
+    if (issue.yaw == null || issue.pitch == null) continue;
+    markers.push({
+      id: `issue-${issue.id}`,
+      kind: "issue",
+      yaw: issue.yaw,
+      pitch: issue.pitch,
+      tooltip: `${issue.title} · ${issue.status || "open"}/${issue.severity || "medium"}`,
+      refId: issue.id,
+    });
+  }
+  return markers;
 }
 
-function applyViewerPose(photo, pose) {
-  if (!photo) return;
-  state.viewerPose = {
-    photoId: photo.id,
-    yaw: normalizeYaw(pose.yaw ?? 0),
-    pitch: clamp(pose.pitch ?? 0, -85, 85),
-    fov: clamp(pose.fov ?? 75, 35, 110),
-  };
+// Lazily mount a PSV instance in a container and wire its events once. The
+// bridge module (viewer360.js) may still be loading when app.js first runs,
+// so callers go through ensureViewer360Ready().
+function ensureViewer360(slot, container) {
+  if (state.viewer360[slot]) return state.viewer360[slot];
+  if (!window.PanoViewer360 || !container) return null;
+  // The container may still hold a flat-image fallback from a raw frame;
+  // clear it so PSV mounts into a clean node.
+  container.innerHTML = "";
+  const handle = window.PanoViewer360.mount(container, {});
+  if (!handle) return null;
+  handle.on("select-marker", ({ data }) => {
+    if (data.kind === "hotspot" && data.targetPhotoId) {
+      loadViewer(data.targetPhotoId, state.viewerContext.source, state.viewerContext.collectionId)
+        .catch((error) => setStatus(error.message, true));
+    }
+  });
+  handle.on("click", ({ yaw, pitch }) => {
+    handleViewerClick(slot, yaw, pitch);
+  });
+  state.viewer360[slot] = handle;
+  return handle;
 }
 
-function clearViewerCanvas(canvas, overlay, message) {
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  canvas.width = canvas.clientWidth || 640;
-  canvas.height = canvas.clientHeight || 360;
-  ctx.fillStyle = "#162025";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#dfe7eb";
-  ctx.font = "16px Segoe UI";
-  ctx.fillText(message, 24, 32);
-  if (overlay) overlay.innerHTML = "";
+let viewer360ReadyPromise = null;
+function ensureViewer360Ready() {
+  if (window.PanoViewer360) return Promise.resolve();
+  if (!viewer360ReadyPromise) {
+    viewer360ReadyPromise = new Promise((resolve) => {
+      window.addEventListener("panoviewer360ready", () => resolve(), { once: true });
+    });
+  }
+  return viewer360ReadyPromise;
 }
 
-function viewerShell() {
-  return elements.viewerCanvas?.closest(".viewer-shell") || null;
+// A true equirectangular pano is ~2:1. Raw DJI stitch frames (the 4:3 source
+// tiles in PANORAMA subfolders) sometimes get imported by mistake; mapping one
+// onto a full sphere produces a mangled "tiny planet". Probe the image once and
+// let the viewer fall back to a flat display for anything that isn't ~2:1.
+const panoRatioCache = {};
+function probeIsPanorama(url) {
+  if (url in panoRatioCache) return Promise.resolve(panoRatioCache[url]);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const ratio = img.naturalHeight ? img.naturalWidth / img.naturalHeight : 0;
+      const isPano = ratio >= 1.9;
+      panoRatioCache[url] = isPano;
+      resolve(isPano);
+    };
+    img.onerror = () => {
+      // Don't block a real pano on a transient load error.
+      panoRatioCache[url] = true;
+      resolve(true);
+    };
+    img.src = url;
+  });
+}
+
+function showViewerFlat(slot, container, photo) {
+  const handle = state.viewer360[slot];
+  if (handle) {
+    try {
+      handle.destroy();
+    } catch (_error) {
+      // ignore
+    }
+    state.viewer360[slot] = null;
+  }
+  if (state.viewer360Loaded) state.viewer360Loaded[slot] = null;
+  container.innerHTML = `
+    <div class="viewer-flat">
+      <img src="${photo.viewer_image_url}" alt="">
+      <p>This image is not a 360° panorama — it looks like a raw camera frame.
+      Remove it from Process or Completed if it was imported by mistake.</p>
+    </div>`;
 }
 
 function archiveRecordForPhoto(photo) {
@@ -1733,10 +1791,34 @@ function renderViewerLists(payload) {
   `).join("") || `<div class="muted">No hotspots yet. Add pano-to-pano navigation links.</div>`;
 }
 
+// Load the panorama + markers into a PSV slot, only re-loading the image when
+// the photo actually changes (marker-only refreshes are cheap). If the bridge
+// module hasn't finished loading yet, retry once it signals ready.
+function syncViewer360(slot, container, payload) {
+  if (payload.photo.isPanorama === false) {
+    showViewerFlat(slot, container, payload.photo);
+    return;
+  }
+  const handle = ensureViewer360(slot, container);
+  if (!handle) {
+    ensureViewer360Ready().then(() => renderViewer());
+    return;
+  }
+  state.viewer360Loaded = state.viewer360Loaded || {};
+  const key = `${payload.photo.id}:${payload.photo.viewer_image_url}`;
+  if (state.viewer360Loaded[slot] !== key) {
+    state.viewer360Loaded[slot] = key;
+    handle
+      .setPanorama(payload.photo.viewer_image_url, poseDefaults(payload.photo))
+      .then(() => handle.setMarkers(markersForPayload(payload)));
+  } else {
+    handle.setMarkers(markersForPayload(payload));
+  }
+}
+
 function renderViewer() {
   const payload = state.viewerPayload;
   if (!payload) {
-    clearViewerCanvas(elements.viewerCanvas, elements.viewerOverlay, "Select a pano to open the viewer.");
     renderViewerEmptyState();
     elements.viewerTagsList.innerHTML = `<div class="muted">No pano selected.</div>`;
     elements.viewerAnnotationsList.innerHTML = `<div class="muted">No pano selected.</div>`;
@@ -1755,11 +1837,11 @@ function renderViewer() {
     }
     return;
   }
-  renderPanoCanvas(elements.viewerCanvas, elements.viewerOverlay, payload);
+  syncViewer360("viewer", elements.viewer360Container, payload);
   renderViewerDetails(payload);
   renderViewerLists(payload);
-  const pose = currentViewerPose(payload.photo);
-  elements.viewerNorthOffset.value = payload.photo.viewer_state?.north_offset ?? 0;
+  const pose = poseDefaults(payload.photo);
+  elements.viewerNorthOffset.value = pose.northOffset;
   elements.viewerDefaultYaw.value = Number(pose.yaw).toFixed(1);
   const index = currentViewerIndex();
   const sequence = viewerSequence();
@@ -1772,16 +1854,15 @@ function renderViewer() {
   elements.saveViewerStateButton.disabled = false;
   if (elements.viewerFullscreenButton) {
     elements.viewerFullscreenButton.disabled = false;
-    elements.viewerFullscreenButton.textContent = document.fullscreenElement === viewerShell() ? "Exit Full Screen" : "Full Screen";
+    elements.viewerFullscreenButton.textContent = "Full Screen";
   }
 }
 
 function renderCollectionViewer() {
   if (!state.viewerPayload || state.viewerContext.source !== "collection") {
-    clearViewerCanvas(elements.collectionViewerCanvas, elements.collectionViewerOverlay, "Open a pano from this collection.");
     return;
   }
-  renderPanoCanvas(elements.collectionViewerCanvas, elements.collectionViewerOverlay, state.viewerPayload);
+  syncViewer360("collection", elements.collectionViewer360Container, state.viewerPayload);
 }
 
 function renderAudit() {
@@ -1793,217 +1874,6 @@ function renderAudit() {
       <td>${JSON.stringify(event.payload || {})}</td>
     </tr>
   `).join("") || `<tr><td colspan="4">No audit events yet.</td></tr>`;
-}
-
-function renderPanoCanvas(canvas, overlay, payload) {
-  if (!canvas) return;
-  const photo = payload.photo;
-  const cacheKey = photo.image_url;
-  if (!state.viewerImageCache[cacheKey]) {
-    const image = new Image();
-    image.src = cacheKey;
-    image.onload = () => {
-      const rasterCanvas = document.createElement("canvas");
-      rasterCanvas.width = image.naturalWidth;
-      rasterCanvas.height = image.naturalHeight;
-      const rasterCtx = rasterCanvas.getContext("2d", { willReadFrequently: true });
-      rasterCtx.drawImage(image, 0, 0);
-      const raster = rasterCtx.getImageData(0, 0, image.naturalWidth, image.naturalHeight);
-      state.viewerImageCache[cacheKey] = {
-        status: "ready",
-        image,
-        width: image.naturalWidth,
-        height: image.naturalHeight,
-        data: raster.data,
-      };
-      renderAll();
-    };
-    image.onerror = () => clearViewerCanvas(canvas, overlay, "Unable to load pano image.");
-    state.viewerImageCache[cacheKey] = { status: "loading", image };
-    clearViewerCanvas(canvas, overlay, "Loading pano...");
-    return;
-  }
-  const resource = state.viewerImageCache[cacheKey];
-  if (resource.status !== "ready") {
-    clearViewerCanvas(canvas, overlay, "Loading pano...");
-    return;
-  }
-  const ctx = canvas.getContext("2d");
-  const width = canvas.clientWidth || 900;
-  const height = canvas.clientHeight || 480;
-  canvas.width = width;
-  canvas.height = height;
-  const pose = currentViewerPose(photo);
-  const yaw = Number(pose.yaw || 0);
-  const pitch = Number(pose.pitch || 0);
-  const fov = Number(pose.fov || 75);
-  drawProjectedPanorama(ctx, resource, width, height, yaw, pitch, fov);
-  renderViewerOverlay(overlay, payload, width, height, yaw, pitch);
-}
-
-function viewFovRadians(width, height, horizontalFovDegrees) {
-  const hfov = clamp(horizontalFovDegrees, 35, 110) * DEG2RAD;
-  const vfov = 2 * Math.atan(Math.tan(hfov / 2) * (height / width));
-  return { hfov, vfov };
-}
-
-function projectAngularPoint(itemYaw, itemPitch, cameraYaw, cameraPitch, width, height, fovDegrees) {
-  const { hfov, vfov } = viewFovRadians(width, height, fovDegrees);
-  const yaw = cameraYaw * DEG2RAD;
-  const pitch = cameraPitch * DEG2RAD;
-  const lon = itemYaw * DEG2RAD;
-  const lat = itemPitch * DEG2RAD;
-
-  const worldX = Math.sin(lon) * Math.cos(lat);
-  const worldY = Math.sin(lat);
-  const worldZ = Math.cos(lon) * Math.cos(lat);
-
-  const cosYaw = Math.cos(yaw);
-  const sinYaw = Math.sin(yaw);
-  const yawX = worldX * cosYaw - worldZ * sinYaw;
-  const yawZ = worldX * sinYaw + worldZ * cosYaw;
-
-  const cosPitch = Math.cos(pitch);
-  const sinPitch = Math.sin(pitch);
-  const cameraX = yawX;
-  const cameraY = worldY * cosPitch - yawZ * sinPitch;
-  const cameraZ = worldY * sinPitch + yawZ * cosPitch;
-
-  if (cameraZ <= 0) {
-    return null;
-  }
-
-  const projectedX = (cameraX / cameraZ) / Math.tan(hfov / 2);
-  const projectedY = (cameraY / cameraZ) / Math.tan(vfov / 2);
-  const x = ((projectedX + 1) * 0.5) * width;
-  const y = ((1 - projectedY) * 0.5) * height;
-
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return null;
-  }
-  return { x, y };
-}
-
-function drawProjectedPanorama(ctx, resource, width, height, yawDegrees, pitchDegrees, fovDegrees) {
-  const qualityScale = clamp(window.devicePixelRatio || 1, 1, 2);
-  const renderWidth = clamp(Math.round(width * qualityScale), 960, 2400);
-  const renderHeight = Math.max(320, Math.round(renderWidth * (height / width)));
-  const scratch = document.createElement("canvas");
-  scratch.width = renderWidth;
-  scratch.height = renderHeight;
-  const scratchCtx = scratch.getContext("2d");
-  const imageData = scratchCtx.createImageData(renderWidth, renderHeight);
-  const output = imageData.data;
-
-  const { hfov, vfov } = viewFovRadians(renderWidth, renderHeight, fovDegrees);
-  const halfTanX = Math.tan(hfov / 2);
-  const halfTanY = Math.tan(vfov / 2);
-
-  const yaw = yawDegrees * DEG2RAD;
-  const pitch = pitchDegrees * DEG2RAD;
-  const cosYaw = Math.cos(yaw);
-  const sinYaw = Math.sin(yaw);
-  const cosPitch = Math.cos(pitch);
-  const sinPitch = Math.sin(pitch);
-
-  const sourceWidth = resource.width;
-  const sourceHeight = resource.height;
-  const source = resource.data;
-
-  let offset = 0;
-  for (let py = 0; py < renderHeight; py += 1) {
-    const screenY = (1 - (2 * ((py + 0.5) / renderHeight))) * halfTanY;
-    for (let px = 0; px < renderWidth; px += 1) {
-      const screenX = ((2 * ((px + 0.5) / renderWidth)) - 1) * halfTanX;
-
-      const invLength = 1 / Math.hypot(screenX, screenY, 1);
-      const cameraX = screenX * invLength;
-      const cameraY = screenY * invLength;
-      const cameraZ = invLength;
-
-      const pitchY = cameraY * cosPitch + cameraZ * sinPitch;
-      const pitchZ = -cameraY * sinPitch + cameraZ * cosPitch;
-      const worldX = cameraX * cosYaw + pitchZ * sinYaw;
-      const worldY = pitchY;
-      const worldZ = -cameraX * sinYaw + pitchZ * cosYaw;
-
-      const lon = Math.atan2(worldX, worldZ);
-      const lat = Math.asin(clamp(worldY, -1, 1));
-      let u = Math.floor(((lon / TWO_PI) + 0.5) * sourceWidth);
-      let v = Math.floor((0.5 - (lat / Math.PI)) * sourceHeight);
-
-      u %= sourceWidth;
-      if (u < 0) u += sourceWidth;
-      v = clamp(v, 0, sourceHeight - 1);
-
-      const sourceOffset = ((v * sourceWidth) + u) * 4;
-      output[offset] = source[sourceOffset];
-      output[offset + 1] = source[sourceOffset + 1];
-      output[offset + 2] = source[sourceOffset + 2];
-      output[offset + 3] = 255;
-      offset += 4;
-    }
-  }
-
-  scratchCtx.putImageData(imageData, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(scratch, 0, 0, width, height);
-  ctx.fillStyle = "rgba(10,14,18,0.15)";
-  ctx.fillRect(0, 0, width, height);
-}
-
-function renderViewerOverlay(overlay, payload, width, height, yaw, pitch) {
-  if (!overlay) return;
-  const northOffset = Number(payload.photo.viewer_state?.north_offset || 0);
-  const pose = currentViewerPose(payload.photo);
-  const items = [];
-  const place = (item, className, label, options = {}) => {
-    const projected = projectAngularPoint(
-      Number(item.yaw || 0),
-      Number(item.pitch || 0),
-      yaw,
-      pitch,
-      width,
-      height,
-      pose.fov,
-    );
-    if (!projected) return;
-    const y = projected.y + Number(options.offsetY || 0);
-    if (projected.x < -80 || projected.x > width + 80 || y < -80 || y > height + 80) return;
-    const tooltip = String(options.tooltip || label || "").replace(/"/g, "&quot;");
-    const content = options.compact ? `<span class="viewer-marker-dot"></span>` : label;
-    items.push(`<button class="${className}" type="button" data-view-photo-id="${item.target_photo_id || payload.photo.id}" data-tooltip="${tooltip}" aria-label="${tooltip}" style="left:${projected.x}px; top:${y}px;">${content}</button>`);
-  };
-  for (const hotspot of payload.hotspots || []) {
-    if (hotspot.disabled) continue;
-    place(
-      hotspot,
-      "viewer-marker hotspot is-compact",
-      hotspot.label || `Pano ${hotspot.target_photo_id}`,
-      {
-        compact: true,
-        offsetY: -18,
-        tooltip: hotspot.label || `Pano ${hotspot.target_photo_id}`,
-      },
-    );
-  }
-  for (const annotation of payload.annotations || []) {
-    place(annotation, "viewer-marker annotation", annotation.label || "Annotation");
-  }
-  for (const issue of payload.issues || []) {
-    if (issue.yaw == null || issue.pitch == null) continue;
-    place(issue, "viewer-marker issue", issue.title);
-  }
-  const northRotation = ((northOffset - yaw) % 360);
-  items.push(`
-    <div class="north-arrow" style="transform: rotate(${northRotation}deg);">
-      <div class="north-arrow-ring"></div>
-      <div class="north-arrow-needle"></div>
-      <span>N</span>
-    </div>
-  `);
-  overlay.innerHTML = items.join("");
 }
 
 function renderRuns() {
@@ -2240,7 +2110,7 @@ function renderMapSelectedDetail(selectedPhoto) {
       ${selectedPhoto.error ? `<div class="map-detail-error"><span>Error</span><strong>${selectedPhoto.error}</strong></div>` : ""}
     </div>
     <div class="detail-actions map-detail-actions">
-      ${selectedPhoto.applied ? `<button data-map-action="open-viewer" type="button">Open Viewer</button>` : ""}
+      <button data-map-action="open-viewer" type="button">Open Viewer</button>
       <button data-map-action="open-source" class="secondary" type="button">Open ${selectedPhoto.applied ? "Processed" : "Pending"}</button>
       ${selectedPhoto.applied ? "" : `<button data-map-action="remove-photo" class="secondary danger" type="button">Remove Photo</button>`}
     </div>
@@ -2688,16 +2558,6 @@ function handleCollectionsClick(event) {
   }
 }
 
-function handleViewerOverlayClick(event) {
-  const target = event.target.closest("[data-view-photo-id]");
-  if (!target) return;
-  const photoId = Number(target.dataset.viewPhotoId);
-  if (!Number.isFinite(photoId)) return;
-  const context = state.viewerContext.source === "collection" ? "collection" : "viewer";
-  const collectionId = state.viewerContext.collectionId;
-  loadViewer(photoId, context, collectionId).catch((error) => setStatus(error.message, true));
-}
-
 async function createProject(event) {
   event.preventDefault();
   const name = elements.projectName.value.trim();
@@ -2899,15 +2759,49 @@ async function importPhotos(paths) {
   if (!requireCurrentProject("import photos") || !paths.length) return;
   const payload = await withBusy(
     "Importing photos…",
-    "Scanning the selected files and folders, reading metadata, and matching areas.",
+    "Scanning the selected files and folders…",
     async () => {
-      const response = await api(`/api/projects/${state.currentProjectId}/photos/import`, {
+      const response = await fetch(`/api/projects/${state.currentProjectId}/photos/import/stream`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paths }),
-        timeoutMs: 0,
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail || `Import failed (HTTP ${response.status}).`);
+      }
+      let summary = null;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const handleEvent = (event) => {
+        if (event.stage === "scan") {
+          elements.busyDetail.textContent = `Scanning folders: ${event.scanned} of ${event.total} files checked — ${event.accepted} pano${event.accepted === 1 ? "" : "s"} accepted`;
+        } else if (event.stage === "import") {
+          elements.busyDetail.textContent = `Importing: ${event.processed} of ${event.total} photos processed`;
+        } else if (event.stage === "error") {
+          throw new Error(event.detail || "Import failed.");
+        } else if (event.stage === "done") {
+          summary = event.summary;
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline;
+        while ((newline = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (line) handleEvent(JSON.parse(line));
+        }
+      }
+      if (!summary) {
+        throw new Error("Import ended without a result — check the server log.");
+      }
+      elements.busyDetail.textContent = "Matching areas and refreshing the workspace…";
       await refreshProjectData();
-      return response;
+      return { summary };
     },
   );
   const summary = payload?.summary || {};
@@ -3428,12 +3322,28 @@ async function loadViewer(photoId, source = "viewer", collectionId = null) {
   state.viewerContext = { source, collectionId };
   const suffix = collectionId ? `?collection_id=${collectionId}` : "";
   state.viewerPayload = await api(`/api/photos/${photoId}/viewer${suffix}`, { timeoutMs: 30000 });
-  applyViewerPose(state.viewerPayload.photo, currentViewerPose(state.viewerPayload.photo));
+  // Classify pano vs raw frame before rendering so the viewer picks 360 or
+  // flat display. The probe uses the same image the viewer loads (cached).
+  state.viewerPayload.photo.isPanorama = await probeIsPanorama(
+    state.viewerPayload.photo.viewer_image_url,
+  );
   renderViewer();
   renderCollections();
   if (source === "viewer" || source === "archive") {
     setTab("viewer");
   }
+}
+
+function liveViewerPose() {
+  const handle = state.viewer360.viewer || state.viewer360.collection;
+  if (handle) {
+    try {
+      return handle.getPosition();
+    } catch (_error) {
+      // fall through to defaults
+    }
+  }
+  return poseDefaults(viewerPhoto());
 }
 
 async function stepViewer(delta, source = state.viewerContext.source) {
@@ -3448,12 +3358,15 @@ async function stepViewer(delta, source = state.viewerContext.source) {
 async function saveViewerState() {
   const photo = viewerPhoto();
   if (!photo) return;
-  const pose = currentViewerPose(photo);
+  // Capture whatever the user is currently looking at, so "Save Orientation"
+  // stores the live view as the pano's default.
+  const pose = liveViewerPose();
+  const yawInput = elements.viewerDefaultYaw.value;
   await api(`/api/photos/${photo.id}/viewer-state`, {
     method: "PUT",
     body: JSON.stringify({
       north_offset: Number(elements.viewerNorthOffset.value || 0),
-      default_yaw: Number(elements.viewerDefaultYaw.value || pose.yaw || 0),
+      default_yaw: Number(yawInput !== "" ? yawInput : pose.yaw || 0),
       default_pitch: pose.pitch || 0,
       default_fov: pose.fov || 75,
     }),
@@ -3490,32 +3403,82 @@ async function addViewerTag() {
   setStatus(`Added tag "${name}".`);
 }
 
+// Arm a placement: the next click on the pano supplies the exact yaw/pitch
+// for the new annotation/issue/hotspot (handleViewerClick below).
+function armPlacement(kind, payload) {
+  state.placementMode = { kind, payload };
+  setStatus("Click the spot on the pano to place it. Press Esc to cancel.");
+}
+
+function cancelPlacement() {
+  if (!state.placementMode) return;
+  state.placementMode = null;
+  setStatus("Placement cancelled.");
+}
+
+async function handleViewerClick(slot, yaw, pitch) {
+  const placement = state.placementMode;
+  const photo = viewerPhoto();
+  if (!placement || !photo) return;
+  state.placementMode = null;
+  try {
+    if (placement.kind === "annotation") {
+      await api(`/api/photos/${photo.id}/annotations`, {
+        method: "POST",
+        body: JSON.stringify({
+          annotation_type: "marker",
+          label: placement.payload.label,
+          yaw,
+          pitch,
+          style: { color: "#f4c542" },
+        }),
+      });
+      setStatus("Added annotation.");
+    } else if (placement.kind === "issue") {
+      await api(`/api/photos/${photo.id}/issues`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: placement.payload.title,
+          severity: "medium",
+          status: "open",
+          yaw,
+          pitch,
+        }),
+      });
+      setStatus("Added issue.");
+    } else if (placement.kind === "hotspot") {
+      await api(`/api/photos/${photo.id}/hotspots`, {
+        method: "POST",
+        body: JSON.stringify({
+          target_photo_id: placement.payload.targetPhotoId,
+          yaw,
+          pitch,
+          label: placement.payload.label,
+        }),
+      });
+      setStatus("Added hotspot.");
+    }
+    await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
+    await refreshProjectData();
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
 async function addAnnotation() {
   const photo = viewerPhoto();
   const label = elements.annotationLabel.value.trim();
   if (!photo || !label) return;
-  await api(`/api/photos/${photo.id}/annotations`, {
-    method: "POST",
-    body: JSON.stringify({ annotation_type: "marker", label, yaw: 0, pitch: 0, style: { color: "#b8db66" } }),
-  });
   elements.annotationLabel.value = "";
-  await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
-  await refreshProjectData();
-  setStatus("Added annotation.");
+  armPlacement("annotation", { label });
 }
 
 async function addIssue() {
   const photo = viewerPhoto();
   const title = elements.issueTitle.value.trim();
   if (!photo || !title) return;
-  await api(`/api/photos/${photo.id}/issues`, {
-    method: "POST",
-    body: JSON.stringify({ title, severity: "medium", status: "open", yaw: 0, pitch: 0 }),
-  });
   elements.issueTitle.value = "";
-  await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
-  await refreshProjectData();
-  setStatus("Added issue.");
+  armPlacement("issue", { title });
 }
 
 async function addNote() {
@@ -3545,12 +3508,7 @@ async function addHotspot() {
   if (!targetRaw) return;
   const targetPhotoId = Number(targetRaw);
   if (!Number.isFinite(targetPhotoId)) return;
-  await api(`/api/photos/${photo.id}/hotspots`, {
-    method: "POST",
-    body: JSON.stringify({ target_photo_id: targetPhotoId, yaw: 25, pitch: -5, label: `Pano ${targetPhotoId}` }),
-  });
-  await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
-  setStatus("Added hotspot.");
+  armPlacement("hotspot", { targetPhotoId, label: `Pano ${targetPhotoId}` });
 }
 
 async function openDesktopPath(pathValue, mode = "open") {
@@ -3758,6 +3716,10 @@ function handlePhotoSelection(event) {
     renderPhotos();
   }
   const actionButton = event.target.closest("[data-action]");
+  if (actionButton?.dataset.action === "view-360") {
+    loadViewer(Number(actionButton.dataset.photoId), "viewer", null).catch((error) => setStatus(error.message, true));
+    return;
+  }
   if (actionButton?.dataset.action === "view-map") {
     focusPhotoOnMap(Number(actionButton.dataset.photoId));
     return;
@@ -3964,105 +3926,9 @@ function handleCollectionsClick(event) {
   loadViewer(photoId, "collection", state.currentCollectionId).catch((error) => setStatus(error.message, true));
 }
 
-function handleViewerOverlayClick(event) {
-  const button = event.target.closest("[data-view-photo-id]");
-  if (!button) return;
-  const targetId = Number(button.dataset.viewPhotoId);
-  if (!targetId) return;
-  loadViewer(targetId, state.viewerContext.source, state.viewerContext.collectionId).catch((error) => setStatus(error.message, true));
-}
-
-async function toggleViewerFullscreen() {
-  const shell = viewerShell();
-  if (!shell) return;
-  if (document.fullscreenElement === shell) {
-    await document.exitFullscreen();
-    return;
-  }
-  await shell.requestFullscreen();
-}
-
-function activeViewerPayloadForCanvas(canvas) {
-  if (canvas === elements.viewerCanvas) {
-    return state.viewerPayload;
-  }
-  if (canvas === elements.collectionViewerCanvas && state.viewerContext.source === "collection") {
-    return state.viewerPayload;
-  }
-  return null;
-}
-
-function handleViewerPointerDown(event) {
-  if (event.button !== 0) return;
-  const canvas = event.currentTarget;
-  const payload = activeViewerPayloadForCanvas(canvas);
-  if (!payload) return;
-  event.preventDefault();
-  const pose = currentViewerPose(payload.photo);
-  state.viewerDrag = {
-    canvas,
-    pointerId: event.pointerId,
-    photoId: payload.photo.id,
-    startClientX: event.clientX,
-    startClientY: event.clientY,
-    startYaw: pose.yaw,
-    startPitch: pose.pitch,
-  };
-  canvas.classList.add("is-dragging");
-  if (canvas.setPointerCapture) {
-    canvas.setPointerCapture(event.pointerId);
-  }
-}
-
-function handleViewerPointerMove(event) {
-  if (!state.viewerDrag) return;
-  const { canvas, photoId, startClientX, startClientY, startYaw, startPitch } = state.viewerDrag;
-  const payload = activeViewerPayloadForCanvas(canvas);
-  if (!payload || payload.photo.id !== photoId) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const pose = currentViewerPose(payload.photo);
-  const deltaX = event.clientX - startClientX;
-  const deltaY = event.clientY - startClientY;
-  applyViewerPose(payload.photo, {
-    yaw: startYaw - ((deltaX / rect.width) * Math.max(pose.fov, 45)),
-    pitch: startPitch + ((deltaY / rect.height) * 70),
-    fov: pose.fov,
-  });
-  renderViewer();
-  renderCollectionViewer();
-}
-
-function stopViewerDrag(event) {
-  if (!state.viewerDrag) return;
-  const { canvas, pointerId } = state.viewerDrag;
-  if (!event || event.pointerId === pointerId) {
-    canvas.classList.remove("is-dragging");
-    if (canvas.releasePointerCapture && pointerId != null) {
-      try {
-        canvas.releasePointerCapture(pointerId);
-      } catch (_error) {
-        // Ignore release errors from detached pointers.
-      }
-    }
-    state.viewerDrag = null;
-  }
-}
-
-function handleViewerWheel(event) {
-  const canvas = event.currentTarget;
-  const payload = activeViewerPayloadForCanvas(canvas);
-  if (!payload) return;
-  event.preventDefault();
-  const pose = currentViewerPose(payload.photo);
-  const scale = event.deltaY < 0 ? 0.9 : 1.1;
-  applyViewerPose(payload.photo, {
-    yaw: pose.yaw,
-    pitch: pose.pitch,
-    fov: pose.fov * scale,
-  });
-  renderViewer();
-  renderCollectionViewer();
+function toggleViewerFullscreen() {
+  const handle = state.viewer360.viewer;
+  if (handle) handle.enterFullscreen();
 }
 
 function handleDocumentClick(event) {
@@ -4319,7 +4185,7 @@ elements.addHotspotButton.addEventListener("click", () => {
   addHotspot().catch((error) => setStatus(error.message, true));
 });
 elements.viewerFullscreenButton.addEventListener("click", () => {
-  toggleViewerFullscreen().catch((error) => setStatus(error.message, true));
+  toggleViewerFullscreen();
 });
 elements.viewerOpenFileButton.addEventListener("click", () => {
   openSelectedViewerPath("open").catch((error) => setStatus(error.message, true));
@@ -4370,15 +4236,6 @@ elements.archivePhotosTable.addEventListener("click", handleArchiveClick);
 elements.collectionsList.addEventListener("click", handleCollectionsClick);
 elements.collectionPhotosTable.addEventListener("click", handleCollectionsClick);
 elements.collectionMapSvg.addEventListener("click", handleCollectionsClick);
-elements.viewerOverlay.addEventListener("click", handleViewerOverlayClick);
-elements.collectionViewerOverlay.addEventListener("click", handleViewerOverlayClick);
-[
-  elements.viewerCanvas,
-  elements.collectionViewerCanvas,
-].forEach((canvas) => {
-  canvas.addEventListener("pointerdown", handleViewerPointerDown);
-  canvas.addEventListener("wheel", handleViewerWheel, { passive: false });
-});
 elements.mapDetail.addEventListener("click", handleMapDetailClick);
 elements.mapDetail.addEventListener("input", handleMapDetailInput);
 elements.mapDetail.addEventListener("change", handleMapDetailInput);
@@ -4386,7 +4243,9 @@ elements.mapDetail.addEventListener("focusin", handleMapDetailFocusIn);
 elements.mapDetail.addEventListener("focusout", handleMapDetailFocusOut);
 document.addEventListener("click", handleDocumentClick);
 document.addEventListener("click", handleCustomSelectClick);
-document.addEventListener("fullscreenchange", renderViewer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.placementMode) cancelPlacement();
+});
 elements.mapLabelsToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapOriginalLabelToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapProposedLabelToggle.addEventListener("change", handleMapLabelToggleChange);
@@ -4394,9 +4253,6 @@ elements.mapShowProcessedToggle.addEventListener("change", handleMapVisibilityCh
 elements.zoomResetButton.addEventListener("click", () => {
   resetMapView();
 });
-window.addEventListener("pointermove", handleViewerPointerMove);
-window.addEventListener("pointerup", stopViewerDrag);
-window.addEventListener("pointercancel", stopViewerDrag);
 
 elements.tabs.forEach((tab) => {
   tab.addEventListener("click", () => {

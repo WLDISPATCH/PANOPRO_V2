@@ -49,3 +49,37 @@ def ensure_thumbnail(
     data, width, height = prepare_thumbnail(source_path, size)
     thumb_path.write_bytes(data)
     return thumb_path, width, height
+
+
+def ensure_viewer_image(
+    source_path: Path,
+    cache_dir: Path,
+    photo_id: int,
+    max_width: int = 8192,
+) -> Path:
+    """Return a WebGL-safe viewer copy of a pano, capped at max_width.
+
+    Panos already within the cap are served straight from disk (no copy).
+    Oversized panos (14400px M4E output) are downscaled once into the cache
+    and reused until the source file changes. 8192px keeps the whole
+    equirectangular image inside a single WebGL texture on field-laptop GPUs
+    while staying ~4x lighter to download than the 14400px original.
+    """
+    with Image.open(source_path) as probe:
+        width, height = probe.size
+    if width <= max_width:
+        return source_path
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"photo_{photo_id}.jpg"
+    if cache_path.exists() and cache_path.stat().st_mtime >= source_path.stat().st_mtime:
+        return cache_path
+
+    target_height = round(height * max_width / width)
+    with Image.open(source_path) as image:
+        image.draft("RGB", (max_width, target_height))
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGB")
+        image.thumbnail((max_width, target_height))
+        image.save(cache_path, format="JPEG", quality=88, optimize=True)
+    return cache_path
