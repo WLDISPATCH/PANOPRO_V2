@@ -1600,16 +1600,37 @@ function markersForPayload(payload) {
   return markers;
 }
 
+// Each viewer container holds two persistent children: the PSV mount host and
+// a flat-image overlay. We never tear the PSV WebGL context down — repeatedly
+// creating/destroying WebGL contexts crashes QtWebEngine (Qt6WebEngineCore
+// access violation on the field machines). Raw frames just show the overlay
+// on top of the (idle) 360 viewer instead of destroying it.
+function viewerSlotNodes(container) {
+  let psvHost = container.querySelector(".viewer-360-psv");
+  if (!psvHost) {
+    container.innerHTML = "";
+    psvHost = document.createElement("div");
+    psvHost.className = "viewer-360-psv";
+    const flat = document.createElement("div");
+    flat.className = "viewer-360-flat";
+    flat.hidden = true;
+    container.appendChild(psvHost);
+    container.appendChild(flat);
+  }
+  return {
+    psvHost,
+    flat: container.querySelector(".viewer-360-flat"),
+  };
+}
+
 // Lazily mount a PSV instance in a container and wire its events once. The
 // bridge module (viewer360.js) may still be loading when app.js first runs,
 // so callers go through ensureViewer360Ready().
 function ensureViewer360(slot, container) {
   if (state.viewer360[slot]) return state.viewer360[slot];
   if (!window.PanoViewer360 || !container) return null;
-  // The container may still hold a flat-image fallback from a raw frame;
-  // clear it so PSV mounts into a clean node.
-  container.innerHTML = "";
-  const handle = window.PanoViewer360.mount(container, {});
+  const { psvHost } = viewerSlotNodes(container);
+  const handle = window.PanoViewer360.mount(psvHost, {});
   if (!handle) return null;
   handle.on("select-marker", ({ data }) => {
     if (data.kind === "hotspot" && data.targetPhotoId) {
@@ -1659,23 +1680,25 @@ function probeIsPanorama(url) {
   });
 }
 
+// Show a raw frame as a flat overlay. The PSV instance underneath is left
+// mounted (its WebGL context stays alive); we never destroy it.
 function showViewerFlat(slot, container, photo) {
-  const handle = state.viewer360[slot];
-  if (handle) {
-    try {
-      handle.destroy();
-    } catch (_error) {
-      // ignore
-    }
-    state.viewer360[slot] = null;
-  }
-  if (state.viewer360Loaded) state.viewer360Loaded[slot] = null;
-  container.innerHTML = `
+  const { flat } = viewerSlotNodes(container);
+  flat.innerHTML = `
     <div class="viewer-flat">
       <img src="${photo.viewer_image_url}" alt="">
       <p>This image is not a 360° panorama — it looks like a raw camera frame.
       Remove it from Process or Completed if it was imported by mistake.</p>
     </div>`;
+  flat.hidden = false;
+}
+
+function hideViewerFlat(container) {
+  const flat = container.querySelector(".viewer-360-flat");
+  if (flat) {
+    flat.hidden = true;
+    flat.innerHTML = "";
+  }
 }
 
 function archiveRecordForPhoto(photo) {
@@ -1800,6 +1823,7 @@ function syncViewer360(slot, container, payload) {
     showViewerFlat(slot, container, payload.photo);
     return;
   }
+  hideViewerFlat(container);
   const handle = ensureViewer360(slot, container);
   if (!handle) {
     ensureViewer360Ready().then(() => renderViewer());
