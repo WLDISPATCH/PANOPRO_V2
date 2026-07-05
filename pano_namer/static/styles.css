@@ -2132,29 +2132,53 @@ button:disabled:hover {
   position: relative;
 }
 
-.map-selected-summary {
+.map-selected-summary,
+.map-selected-title {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 10px;
 }
 
-.map-selected-summary strong {
+.map-selected-summary strong,
+.map-selected-title strong {
   display: block;
   color: var(--ink);
   overflow-wrap: anywhere;
 }
 
-.map-selected-summary span {
+.map-selected-summary span,
+.map-selected-title span {
   color: var(--muted);
   font-size: 0.78rem;
 }
 
-.map-detail-head {
-  margin-bottom: 8px;
+.map-detail-actions {
+  margin: 12px 0 0;
 }
 
-.map-detail-actions {
+/* Selection-card details are collapsed by default to keep the panel simple. */
+.map-info-dropdown {
   margin: 12px 0;
+}
+
+.map-info-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.map-detail-stack {
+  display: none;
+  margin-top: 10px;
+}
+
+.map-detail-stack.is-open {
+  display: flex;
+}
+
+.map-remove-action {
+  width: 100%;
 }
 
 .map-detail-error strong,

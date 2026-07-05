@@ -26,6 +26,7 @@ const state = {
   mapAreaDraftPhotoId: null,
   mapAreaDraftId: null,
   mapAreaMenuOpen: false,
+  mapDetailInfoOpen: false,
   pendingAreaMenuPhotoId: null,
   pendingAreaMenuScope: null,
   selectedPhotoIds: new Set(),
@@ -2096,25 +2097,31 @@ function renderMapSelectedDetail(selectedPhoto) {
         <button id="map-save-area-button" type="button">Save Area</button>
       </div>
     `;
+  const infoOpen = state.mapDetailInfoOpen;
   elements.mapDetail.innerHTML = `
-    <div class="map-selected-summary">
+    <div class="map-selected-title">
       <strong>${baseName(selectedPhoto.proposed_filename || selectedPhoto.final_filename || selectedPhoto.original_path)}</strong>
       <span>${photoMapStatus(selectedPhoto)}</span>
     </div>
-    <div class="map-detail-stack">
-      <div><span>Original</span><strong>${shortPath(selectedPhoto.original_path)}</strong></div>
-      <div><span>Proposed / Final</span><strong>${selectedPhoto.proposed_filename || selectedPhoto.final_filename || "-"}</strong></div>
-      <div><span>Capture Date</span><strong>${fmtDate(selectedPhoto.capture_ts)}</strong></div>
-      <div><span>Matched Area</span><strong>${selectedPhoto.area_name || "Unassigned"}</strong><small>${selectedPhoto.match_mode || "No match mode"}</small></div>
-      <div><span>Coordinates</span><strong>${coordinates.gps}</strong><small>${coordinates.projected}</small></div>
-      ${selectedPhoto.error ? `<div class="map-detail-error"><span>Error</span><strong>${selectedPhoto.error}</strong></div>` : ""}
-    </div>
+    ${areaEditor}
     <div class="detail-actions map-detail-actions">
       <button data-map-action="open-viewer" type="button">Open Viewer</button>
       <button data-map-action="open-source" class="secondary" type="button">Open ${selectedPhoto.applied ? "Processed" : "Pending"}</button>
-      ${selectedPhoto.applied ? "" : `<button data-map-action="remove-photo" class="secondary danger" type="button">Remove Photo</button>`}
     </div>
-    ${areaEditor}
+    <div class="map-info-dropdown">
+      <button class="map-info-toggle secondary" type="button" data-map-action="toggle-info" aria-expanded="${infoOpen ? "true" : "false"}">
+        <span>Details</span><span>${infoOpen ? "▴" : "▾"}</span>
+      </button>
+      <div class="map-detail-stack ${infoOpen ? "is-open" : ""}">
+        <div><span>Original</span><strong>${shortPath(selectedPhoto.original_path)}</strong></div>
+        <div><span>Proposed / Final</span><strong>${selectedPhoto.proposed_filename || selectedPhoto.final_filename || "-"}</strong></div>
+        <div><span>Capture Date</span><strong>${fmtDate(selectedPhoto.capture_ts)}</strong></div>
+        <div><span>Matched Area</span><strong>${selectedPhoto.area_name || "Unassigned"}</strong><small>${selectedPhoto.match_mode || "No match mode"}</small></div>
+        <div><span>Coordinates</span><strong>${coordinates.gps}</strong><small>${coordinates.projected}</small></div>
+        ${selectedPhoto.error ? `<div class="map-detail-error"><span>Error</span><strong>${selectedPhoto.error}</strong></div>` : ""}
+      </div>
+    </div>
+    ${selectedPhoto.applied ? "" : `<div class="detail-actions"><button data-map-action="remove-photo" class="secondary danger map-remove-action" type="button">Remove Photo</button></div>`}
     ${state.overlay?.error ? `<div class="map-warning">Overlay: ${state.overlay.error}</div>` : ""}
   `;
 }
@@ -3817,6 +3824,11 @@ function handleMapDetailClick(event) {
     }
     if (action === "remove-photo" && !selectedPhoto.applied) {
       removePhoto(selectedPhoto.id).catch((error) => setStatus(error.message, true));
+      return;
+    }
+    if (action === "toggle-info") {
+      state.mapDetailInfoOpen = !state.mapDetailInfoOpen;
+      renderMap();
       return;
     }
   }
