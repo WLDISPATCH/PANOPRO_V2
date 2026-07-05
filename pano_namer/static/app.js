@@ -1604,6 +1604,9 @@ function markersForPayload(payload) {
 function ensureViewer360(slot, container) {
   if (state.viewer360[slot]) return state.viewer360[slot];
   if (!window.PanoViewer360 || !container) return null;
+  // The container may still hold a flat-image fallback from a raw frame;
+  // clear it so PSV mounts into a clean node.
+  container.innerHTML = "";
   const handle = window.PanoViewer360.mount(container, {});
   if (!handle) return null;
   handle.on("select-marker", ({ data }) => {
@@ -1628,6 +1631,49 @@ function ensureViewer360Ready() {
     });
   }
   return viewer360ReadyPromise;
+}
+
+// A true equirectangular pano is ~2:1. Raw DJI stitch frames (the 4:3 source
+// tiles in PANORAMA subfolders) sometimes get imported by mistake; mapping one
+// onto a full sphere produces a mangled "tiny planet". Probe the image once and
+// let the viewer fall back to a flat display for anything that isn't ~2:1.
+const panoRatioCache = {};
+function probeIsPanorama(url) {
+  if (url in panoRatioCache) return Promise.resolve(panoRatioCache[url]);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const ratio = img.naturalHeight ? img.naturalWidth / img.naturalHeight : 0;
+      const isPano = ratio >= 1.9;
+      panoRatioCache[url] = isPano;
+      resolve(isPano);
+    };
+    img.onerror = () => {
+      // Don't block a real pano on a transient load error.
+      panoRatioCache[url] = true;
+      resolve(true);
+    };
+    img.src = url;
+  });
+}
+
+function showViewerFlat(slot, container, photo) {
+  const handle = state.viewer360[slot];
+  if (handle) {
+    try {
+      handle.destroy();
+    } catch (_error) {
+      // ignore
+    }
+    state.viewer360[slot] = null;
+  }
+  if (state.viewer360Loaded) state.viewer360Loaded[slot] = null;
+  container.innerHTML = `
+    <div class="viewer-flat">
+      <img src="${photo.viewer_image_url}" alt="">
+      <p>This image is not a 360° panorama — it looks like a raw camera frame.
+      Remove it from Process or Completed if it was imported by mistake.</p>
+    </div>`;
 }
 
 function archiveRecordForPhoto(photo) {
@@ -1748,6 +1794,10 @@ function renderViewerLists(payload) {
 // the photo actually changes (marker-only refreshes are cheap). If the bridge
 // module hasn't finished loading yet, retry once it signals ready.
 function syncViewer360(slot, container, payload) {
+  if (payload.photo.isPanorama === false) {
+    showViewerFlat(slot, container, payload.photo);
+    return;
+  }
   const handle = ensureViewer360(slot, container);
   if (!handle) {
     ensureViewer360Ready().then(() => renderViewer());
@@ -3271,6 +3321,11 @@ async function loadViewer(photoId, source = "viewer", collectionId = null) {
   state.viewerContext = { source, collectionId };
   const suffix = collectionId ? `?collection_id=${collectionId}` : "";
   state.viewerPayload = await api(`/api/photos/${photoId}/viewer${suffix}`, { timeoutMs: 30000 });
+  // Classify pano vs raw frame before rendering so the viewer picks 360 or
+  // flat display. The probe uses the same image the viewer loads (cached).
+  state.viewerPayload.photo.isPanorama = await probeIsPanorama(
+    state.viewerPayload.photo.viewer_image_url,
+  );
   renderViewer();
   renderCollections();
   if (source === "viewer" || source === "archive") {
