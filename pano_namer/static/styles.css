@@ -813,7 +813,7 @@ button.secondary,
   background: #000;
 }
 
-.viewer-shell:fullscreen .viewer-canvas {
+.viewer-shell:fullscreen .viewer-360 {
   min-height: 100vh;
 }
 
@@ -821,28 +821,34 @@ button.secondary,
   min-height: 360px;
 }
 
-.viewer-canvas {
+/* Photo Sphere Viewer mount point (WebGL 360 viewer). */
+.viewer-360 {
   width: 100%;
   height: 100%;
   min-height: 360px;
   display: block;
-  background: #e7eef4;
-  cursor: grab;
+  background: #0c192a;
 }
 
-.viewer-canvas.is-dragging {
-  cursor: grabbing;
+.viewer-360 .psv-hotspot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: var(--dot, #17b0c4);
+  box-shadow: 0 0 0 3px rgba(23, 176, 196, 0.35);
+  cursor: pointer;
 }
 
-.viewer-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.viewer-overlay .viewer-marker,
-.viewer-overlay .north-arrow {
-  pointer-events: auto;
+.viewer-360-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 360px;
+  padding: 24px;
+  color: #dfe7eb;
+  text-align: center;
 }
 
 .viewer-nav {

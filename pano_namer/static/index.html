@@ -6,7 +6,20 @@
   <title>PANO PRO</title>
   <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/vendor/psv/core/index.css">
+  <link rel="stylesheet" href="/static/vendor/psv/markers/index.css">
+  <link rel="stylesheet" href="/static/vendor/psv/compass/index.css">
   <link rel="stylesheet" href="/static/styles.css?v=2.7.0-dev">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/static/vendor/psv/three.module.js",
+      "@photo-sphere-viewer/core": "/static/vendor/psv/core/index.module.js",
+      "@photo-sphere-viewer/markers-plugin": "/static/vendor/psv/markers/index.module.js",
+      "@photo-sphere-viewer/compass-plugin": "/static/vendor/psv/compass/index.module.js"
+    }
+  }
+  </script>
 </head>
 <body>
   <div class="shell">
@@ -336,8 +349,7 @@
                 <span id="viewer-stage-badge" class="badge warn">Waiting</span>
               </div>
               <div class="viewer-shell viewer-hero-shell">
-                <canvas id="viewer-canvas" class="viewer-canvas"></canvas>
-                <div id="viewer-overlay" class="viewer-overlay"></div>
+                <div id="viewer-360" class="viewer-360"></div>
               </div>
               <div id="viewer-empty-state" class="viewer-empty-state">Select a processed or archived pano from Process, Library, or the Map to start a 360 inspection.</div>
             </div>
@@ -516,8 +528,7 @@
                 </table>
               </div>
               <div class="viewer-shell viewer-shell-compact">
-                <canvas id="collection-viewer-canvas" class="viewer-canvas"></canvas>
-                <div id="collection-viewer-overlay" class="viewer-overlay"></div>
+                <div id="collection-viewer-360" class="viewer-360"></div>
               </div>
             </div>
           </div>
@@ -734,6 +745,7 @@
 
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/static/viewer360.js?v=2.7.0-dev"></script>
   <script src="/static/app.js?v=2.7.0-dev"></script>
 </body>
 </html>

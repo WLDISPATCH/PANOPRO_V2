@@ -89,7 +89,12 @@ from pano_namer.schemas import (
 )
 from pano_namer.services.common import dumps_json, ensure_path, loads_json, utc_now
 from pano_namer.services.dxf import build_manual_polygon_wkt, extract_area_geometry_wkt
-from pano_namer.services.media import content_hash, ensure_thumbnail, prepare_thumbnail
+from pano_namer.services.media import (
+    content_hash,
+    ensure_thumbnail,
+    ensure_viewer_image,
+    prepare_thumbnail,
+)
 from pano_namer.services.matching import choose_area_match
 from pano_namer.services.photos import read_photo_metadata
 from pano_namer.services import overlay_tiles, shared_naming
@@ -110,6 +115,7 @@ from pano_namer.services.site_insight_uploads import SiteInsightSettings
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 THUMBNAIL_DIR_NAME = "thumbnails"
+VIEWER_CACHE_DIR_NAME = "viewer_cache"
 
 
 def safe_upload_name(filename: str | None) -> str:
@@ -347,6 +353,12 @@ def build_rename_summary(results: list[dict[str, Any]]) -> dict[str, int]:
 
 def thumbnail_dir(cfg: AppConfig) -> Path:
     path = cfg.data_dir / THUMBNAIL_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def viewer_cache_dir(cfg: AppConfig) -> Path:
+    path = cfg.data_dir / VIEWER_CACHE_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -699,6 +711,7 @@ def photo_detail_payload(
     return {
         **photo,
         "image_url": f"/api/photos/{photo_id}/image",
+        "viewer_image_url": f"/api/photos/{photo_id}/viewer-image",
         "thumbnail_url": thumb["url"] if thumb else None,
         "thumbnail_width": thumb["width"] if thumb else None,
         "thumbnail_height": thumb["height"] if thumb else None,
@@ -1773,6 +1786,25 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if not path.exists():
             raise HTTPException(status_code=404, detail="Photo file not found")
         return FileResponse(path)
+
+    @app.get("/api/photos/{photo_id}/viewer-image")
+    def photo_viewer_image(photo_id: int) -> FileResponse:
+        with db.connect() as conn:
+            row = conn.execute(
+                "SELECT original_path FROM photos WHERE id = ?", (photo_id,)
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Photo not found")
+        path = Path(row["original_path"])
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Photo file not found")
+        try:
+            served = ensure_viewer_image(path, viewer_cache_dir(cfg), photo_id)
+        except Exception:
+            served = path
+        return FileResponse(
+            served, headers={"Cache-Control": "public, max-age=86400"}
+        )
 
     @app.get("/api/photos/{photo_id}/thumbnail")
     def photo_thumbnail(photo_id: int) -> FileResponse:
