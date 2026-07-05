@@ -13,6 +13,50 @@ from pano_namer import __version__
 from pano_namer.main import create_app
 
 _DESKTOP_STATE_FILE = Path.home() / ".pano_namer_desktop_state.json"
+_DESKTOP_LOG_FILE = Path.home() / ".pano_namer_desktop.log"
+
+
+def enable_crash_logging(log_path: Path = _DESKTOP_LOG_FILE) -> Path | None:
+    """Capture crashes to a log file so silent exits become diagnosable.
+
+    The launcher console only shows "exited, error should be shown above"
+    with nothing above it when the process dies from a native fault or an
+    exception on a background thread. faulthandler catches hard crashes
+    (segfaults, aborts, OOM kills) with a Python traceback for every
+    thread, and the exception hooks catch the rest.
+    """
+    import atexit
+    import faulthandler
+    import traceback
+    from datetime import datetime
+
+    try:
+        handle = log_path.open("a", encoding="utf-8", errors="replace")
+        handle.write(
+            f"\n=== PANO PRO v{__version__} started {datetime.now().isoformat(timespec='seconds')} pid={os.getpid()} ===\n"
+        )
+        handle.flush()
+    except OSError:
+        return None
+
+    faulthandler.enable(file=handle, all_threads=True)
+
+    def log_exception(exc_type, exc, tb) -> None:
+        try:
+            handle.write(f"--- unhandled exception {datetime.now().isoformat(timespec='seconds')} ---\n")
+            traceback.print_exception(exc_type, exc, tb, file=handle)
+            handle.flush()
+        except OSError:
+            pass
+        sys.__excepthook__(exc_type, exc, tb)
+
+    def log_thread_exception(args) -> None:
+        log_exception(args.exc_type, args.exc_value, args.exc_traceback)
+
+    sys.excepthook = log_exception
+    threading.excepthook = log_thread_exception
+    atexit.register(handle.flush)
+    return log_path
 
 
 def ensure_std_streams() -> None:
@@ -96,6 +140,9 @@ def _selection_directory(selection: list[str]) -> Path | None:
 
 def main() -> int:
     ensure_std_streams()
+    log_path = enable_crash_logging()
+    if log_path is not None:
+        print(f"Crash log: {log_path}")
 
     from PySide6.QtCore import QObject, QUrl, Signal, Slot
     from PySide6.QtWebChannel import QWebChannel

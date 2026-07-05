@@ -16,6 +16,7 @@ const state = {
   overlays: [],
   runs: [],
   mapData: null,
+  mapDataSerialized: null,
   mapDataLoading: false,
   mapDataError: null,
   mapDataRequestKey: null,
@@ -1010,8 +1011,15 @@ async function refreshMapData(projectId = state.currentProjectId) {
     if (state.currentProjectId !== projectId || state.mapDataRequestKey !== requestKey) {
       return;
     }
+    // Only bump the version when the payload actually changed; the version
+    // invalidates the Leaflet layer cache, and rebuilding every polygon and
+    // marker after each refresh is what made deletes/tab switches laggy.
+    const serialized = JSON.stringify(mapData);
+    if (state.mapDataSerialized !== serialized) {
+      state.mapDataSerialized = serialized;
+      state.mapDataVersion += 1;
+    }
     state.mapData = mapData;
-    state.mapDataVersion += 1;
     state.mapDataError = null;
   } catch (error) {
     if (state.currentProjectId !== projectId || state.mapDataRequestKey !== requestKey) {
@@ -2345,6 +2353,7 @@ function ensureLeafletMap() {
   state.leaflet = {
     map,
     overlayLayer: null,
+    overlayKey: null,
     areaLayer: L.layerGroup().addTo(map),
     photoLayer: L.layerGroup().addTo(map),
     drawLayer: L.layerGroup().addTo(map),
@@ -2366,40 +2375,52 @@ function leafletDataKey() {
   ].join("|");
 }
 
-function syncLeafletLayers(leaf) {
-  const key = leafletDataKey();
-  if (leaf.dataKey === key) return;
-  leaf.dataKey = key;
+function syncOverlayLayer(leaf) {
+  // The overlay layer has its own identity key: rebuilding it is expensive
+  // (tile refetches, or a giant PNG re-decode on the imageOverlay fallback)
+  // and only necessary when a different overlay/source is shown.
+  const overlay = state.mapData?.overlay;
+  const usable = overlay?.bounds && (overlay.tile_url || overlay.image_url);
+  const key = usable
+    ? `${overlay.id}|${overlay.tile_url || overlay.image_url}|${JSON.stringify(overlay.bounds)}`
+    : null;
+  if (leaf.overlayKey === key) return;
+  leaf.overlayKey = key;
 
   if (leaf.overlayLayer) {
     leaf.map.removeLayer(leaf.overlayLayer);
     leaf.overlayLayer = null;
   }
-  const overlay = state.mapData?.overlay;
-  if (overlay?.bounds && (overlay.tile_url || overlay.image_url)) {
-    const [ox1, oy1, ox2, oy2] = overlay.bounds;
-    const overlayBounds = L.latLngBounds([oy1, ox1], [oy2, ox2]);
-    if (overlay.tile_url) {
-      // Tile pyramid (PMTiles-backed): the GPU only holds visible tiles,
-      // which avoids the oversized-texture compositor corruption that a
-      // single full-resolution imageOverlay causes in the desktop shell.
-      leaf.overlayLayer = L.tileLayer(overlay.tile_url, {
-        bounds: overlayBounds,
-        minNativeZoom: overlay.tile_min_zoom,
-        maxNativeZoom: overlay.tile_max_zoom,
-        minZoom: -12,
-        maxZoom: 12,
-        tileSize: 256,
-        opacity: 0.72,
-        updateWhenZooming: false,
-      }).addTo(leaf.map);
-    } else {
-      leaf.overlayLayer = L.imageOverlay(overlay.image_url, overlayBounds, {
-        opacity: 0.72,
-      }).addTo(leaf.map);
-    }
-    leaf.overlayLayer.bringToBack();
+  if (!usable) return;
+  const [ox1, oy1, ox2, oy2] = overlay.bounds;
+  const overlayBounds = L.latLngBounds([oy1, ox1], [oy2, ox2]);
+  if (overlay.tile_url) {
+    // Tile pyramid (PMTiles-backed): the GPU only holds visible tiles,
+    // which avoids the oversized-texture compositor corruption that a
+    // single full-resolution imageOverlay causes in the desktop shell.
+    leaf.overlayLayer = L.tileLayer(overlay.tile_url, {
+      bounds: overlayBounds,
+      minNativeZoom: overlay.tile_min_zoom,
+      maxNativeZoom: overlay.tile_max_zoom,
+      minZoom: -12,
+      maxZoom: 12,
+      tileSize: 256,
+      opacity: 0.72,
+      updateWhenZooming: false,
+    }).addTo(leaf.map);
+  } else {
+    leaf.overlayLayer = L.imageOverlay(overlay.image_url, overlayBounds, {
+      opacity: 0.72,
+    }).addTo(leaf.map);
   }
+  leaf.overlayLayer.bringToBack();
+}
+
+function syncLeafletLayers(leaf) {
+  syncOverlayLayer(leaf);
+  const key = leafletDataKey();
+  if (leaf.dataKey === key) return;
+  leaf.dataKey = key;
 
   leaf.areaLayer.clearLayers();
   for (const area of state.mapData?.areas || []) {
