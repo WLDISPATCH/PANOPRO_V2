@@ -108,32 +108,53 @@ def is_stitched_pano(path: Path) -> bool:
     return height > 0 and width == height * 2 and width >= _MIN_FALLBACK_PANO_WIDTH
 
 
-def scan_for_panos(source_root: Path) -> ScanResult:
-    """Walk a DCIM tree (or any folder) and collect stitched panos.
+def scan_events(source_root: Path):
+    """Walk a DCIM tree yielding progress dicts, then a final result dict.
 
     Non-pano JPGs are only counted so the summary can show the card was
-    fully read; nothing besides stitched panos is ever imported.
+    fully read; nothing besides stitched panos is ever imported. Progress
+    events ({"type": "progress", scanned, total, panos}) are throttled to
+    every few files; the last event is {"type": "result", "result": ScanResult}.
     """
     result = ScanResult(source_root=source_root)
     scan_root = source_root / "DCIM" if (source_root / "DCIM").is_dir() else source_root
-    for path in sorted(scan_root.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in PANO_EXTENSIONS:
-            continue
+    candidates = [
+        path
+        for path in sorted(scan_root.rglob("*"))
+        if path.is_file() and path.suffix.lower() in PANO_EXTENSIONS
+    ]
+    total = len(candidates)
+    for index, path in enumerate(candidates, start=1):
         if not is_stitched_pano(path):
             result.skipped_normal += 1
-            continue
-        try:
-            meta = read_photo_metadata(path)
-        except Exception:
-            result.skipped_unreadable += 1
-            continue
-        result.panos.append(
-            ScannedPano(
-                path=path,
-                original_name=path.name,
-                gps_lat=meta["gps_lat"],
-                gps_lon=meta["gps_lon"],
-                capture_ts=meta["capture_ts"],
-            )
-        )
+        else:
+            try:
+                meta = read_photo_metadata(path)
+                result.panos.append(
+                    ScannedPano(
+                        path=path,
+                        original_name=path.name,
+                        gps_lat=meta["gps_lat"],
+                        gps_lon=meta["gps_lon"],
+                        capture_ts=meta["capture_ts"],
+                    )
+                )
+            except Exception:
+                result.skipped_unreadable += 1
+        if index % 5 == 0 or index == total:
+            yield {
+                "type": "progress",
+                "scanned": index,
+                "total": total,
+                "panos": len(result.panos),
+            }
+    yield {"type": "result", "result": result}
+
+
+def scan_for_panos(source_root: Path) -> ScanResult:
+    """Non-streaming wrapper over scan_events."""
+    result = ScanResult(source_root=source_root)
+    for event in scan_events(source_root):
+        if event["type"] == "result":
+            result = event["result"]
     return result

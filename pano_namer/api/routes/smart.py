@@ -9,12 +9,14 @@ Import (smart_original_name IS NOT NULL) are ever touched.
 
 from __future__ import annotations
 
+import json
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
 from pano_namer.database import Database
 from pano_namer.schemas import (
@@ -124,8 +126,9 @@ def register_smart_routes(
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "error": None}
 
-    @app.post("/api/smart/import", response_model=SmartImportResponse)
-    def smart_import(payload: SmartImportRequest) -> dict[str, Any]:
+    def _prepare_smart_import(payload: SmartImportRequest) -> tuple[Path, Path, Any]:
+        """Validate settings/source before any streaming begins (guards must
+        surface as proper HTTP errors, which is impossible mid-stream)."""
         with db.connect() as conn:
             fetch_project(conn, payload.project_id)
             settings = smart_mode.load_settings(conn)
@@ -160,44 +163,73 @@ def register_smart_routes(
                     + ". Choose one manually.",
                 )
             source_root = drives[0]
+        return base_path, source_root, naming_settings
 
-        scan = sd_card.scan_for_panos(source_root)
+    def _smart_import_events(
+        project_id: int, base_path: Path, source_root: Path, naming_settings
+    ):
+        """Run the import, yielding live progress events; last event is
+        {"stage": "done", "result": summary} or {"stage": "error", ...}."""
+        yield {"stage": "detect", "source_path": str(source_root)}
+
+        scan = None
+        for event in sd_card.scan_events(source_root):
+            if event["type"] == "result":
+                scan = event["result"]
+            else:
+                yield {
+                    "stage": "scan",
+                    "scanned": event["scanned"],
+                    "total": event["total"],
+                    "panos": event["panos"],
+                }
 
         registry_checked = False
         registry_rows: list[dict[str, Any]] = []
         if naming_settings.is_configured() and scan.panos:
+            yield {"stage": "dedupe", "checking": len(scan.panos)}
             try:
                 registry_rows = pano_registry.fetch_registry_rows(
                     naming_settings, [pano.original_name for pano in scan.panos]
                 )
                 registry_checked = True
             except SharedNamingError as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                yield {"stage": "error", "detail": str(exc)}
+                return
 
         duplicates_skipped = 0
         copied = 0
         already_copied = 0
         import_paths: list[Path] = []
         original_names: dict[str, str] = {}
-        for pano in scan.panos:
+        for index, pano in enumerate(scan.panos, start=1):
             if registry_checked and pano_registry.is_registered_duplicate(
                 registry_rows, pano.original_name, pano.gps_lat, pano.gps_lon
             ):
                 duplicates_skipped += 1
-                continue
-            target_dir = base_path / _dated_folder_name(pano.capture_ts)
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_path = target_dir / pano.original_name
-            if target_path.exists():
-                already_copied += 1
             else:
-                shutil.copy2(pano.path, target_path)
-                copied += 1
-            import_paths.append(target_path)
-            original_names[str(target_path)] = pano.original_name
+                target_dir = base_path / _dated_folder_name(pano.capture_ts)
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target_path = target_dir / pano.original_name
+                if target_path.exists():
+                    already_copied += 1
+                else:
+                    shutil.copy2(pano.path, target_path)
+                    copied += 1
+                import_paths.append(target_path)
+                original_names[str(target_path)] = pano.original_name
+            if index % 3 == 0 or index == len(scan.panos):
+                yield {
+                    "stage": "copy",
+                    "processed": index,
+                    "total": len(scan.panos),
+                    "copied": copied,
+                    "duplicates": duplicates_skipped,
+                }
 
+        yield {"stage": "stage", "total": len(import_paths)}
         import_result = (
-            import_photo_paths(payload.project_id, import_paths)
+            import_photo_paths(project_id, import_paths)
             if import_paths
             else {"imported": [], "results": [], "summary": {"imported": 0, "duplicates": 0, "errors": 0}}
         )
@@ -221,18 +253,49 @@ def register_smart_routes(
                     )
                 conn.commit()
 
-        return {
-            "source_path": str(source_root),
-            "panos_found": len(scan.panos),
-            "normal_skipped": scan.skipped_normal,
-            "unreadable_skipped": scan.skipped_unreadable,
-            "duplicates_skipped": duplicates_skipped,
-            "copied": copied,
-            "already_copied": already_copied,
-            "staged": import_result["summary"]["imported"],
-            "registry_checked": registry_checked,
-            "import_summary": import_result["summary"],
+        yield {
+            "stage": "done",
+            "result": {
+                "source_path": str(source_root),
+                "panos_found": len(scan.panos),
+                "normal_skipped": scan.skipped_normal,
+                "unreadable_skipped": scan.skipped_unreadable,
+                "duplicates_skipped": duplicates_skipped,
+                "copied": copied,
+                "already_copied": already_copied,
+                "staged": import_result["summary"]["imported"],
+                "registry_checked": registry_checked,
+                "import_summary": import_result["summary"],
+            },
         }
+
+    @app.post("/api/smart/import", response_model=SmartImportResponse)
+    def smart_import(payload: SmartImportRequest) -> dict[str, Any]:
+        base_path, source_root, naming_settings = _prepare_smart_import(payload)
+        final: dict[str, Any] | None = None
+        for event in _smart_import_events(
+            payload.project_id, base_path, source_root, naming_settings
+        ):
+            if event["stage"] == "error":
+                raise HTTPException(status_code=503, detail=event["detail"])
+            if event["stage"] == "done":
+                final = event["result"]
+        return final
+
+    @app.post("/api/smart/import/stream")
+    def smart_import_stream(payload: SmartImportRequest) -> StreamingResponse:
+        base_path, source_root, naming_settings = _prepare_smart_import(payload)
+
+        def ndjson():
+            try:
+                for event in _smart_import_events(
+                    payload.project_id, base_path, source_root, naming_settings
+                ):
+                    yield json.dumps(event) + "\n"
+            except Exception as exc:  # surfaced as an event; headers already sent
+                yield json.dumps({"stage": "error", "detail": str(exc)}) + "\n"
+
+        return StreamingResponse(ndjson(), media_type="application/x-ndjson")
 
     @app.post("/api/smart/export", response_model=SmartExportResponse)
     def smart_export(payload: SmartExportRequest) -> dict[str, Any]:

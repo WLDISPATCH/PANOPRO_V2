@@ -128,6 +128,8 @@ const elements = {
   smartProgressTitle: document.getElementById("smart-progress-title"),
   smartProgressSummary: document.getElementById("smart-progress-summary"),
   smartProgressSteps: document.getElementById("smart-progress-steps"),
+  smartProgressLive: document.getElementById("smart-progress-live"),
+  smartProgressLiveText: document.getElementById("smart-progress-live-text"),
   smartProgressCloseButton: document.getElementById("smart-progress-close-button"),
   appVersionBadge: document.getElementById("app-version-badge"),
   statusPill: document.getElementById("status-pill"),
@@ -3138,8 +3140,21 @@ function openSmartProgress(title, steps) {
     if (index === 0) item.classList.add("active");
     elements.smartProgressSteps.appendChild(item);
   });
+  elements.smartProgressLive.hidden = false;
+  elements.smartProgressLiveText.textContent = "Starting…";
   elements.smartProgressCloseButton.disabled = true;
   elements.smartProgressModal.hidden = false;
+}
+
+function setSmartProgressStep(activeIndex, liveText) {
+  [...elements.smartProgressSteps.children].forEach((item, index) => {
+    item.classList.toggle("done", index < activeIndex);
+    item.classList.toggle("active", index === activeIndex);
+    item.classList.remove("error");
+  });
+  if (liveText) {
+    elements.smartProgressLiveText.textContent = liveText;
+  }
 }
 
 function finishSmartProgress(summaryText, failed) {
@@ -3147,6 +3162,7 @@ function finishSmartProgress(summaryText, failed) {
     item.classList.remove("active");
     item.classList.add(failed ? "error" : "done");
   });
+  elements.smartProgressLive.hidden = true;
   elements.smartProgressSummary.textContent = summaryText;
   elements.smartProgressCloseButton.disabled = false;
 }
@@ -3172,11 +3188,50 @@ async function runSmartImport() {
     "Stage panos on the map",
   ]);
   try {
-    const result = await api("/api/smart/import", {
+    const response = await fetch("/api/smart/import/stream", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ project_id: state.currentProjectId }),
-      timeoutMs: 600000,
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.detail || `Smart Import failed (HTTP ${response.status}).`);
+    }
+    let result = null;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const handleEvent = (event) => {
+      if (event.stage === "detect") {
+        setSmartProgressStep(1, `Card found: ${event.source_path}`);
+      } else if (event.stage === "scan") {
+        setSmartProgressStep(1, `Scanned ${event.scanned} of ${event.total} files — ${event.panos} pano${event.panos === 1 ? "" : "s"} found`);
+      } else if (event.stage === "dedupe") {
+        setSmartProgressStep(2, `Checking ${event.checking} pano${event.checking === 1 ? "" : "s"} against the shared registry…`);
+      } else if (event.stage === "copy") {
+        setSmartProgressStep(3, `Accepted ${event.copied} of ${event.processed} checked (${event.duplicates} duplicate${event.duplicates === 1 ? "" : "s"} skipped)`);
+      } else if (event.stage === "stage") {
+        setSmartProgressStep(4, `Staging ${event.total} pano${event.total === 1 ? "" : "s"} on the map…`);
+      } else if (event.stage === "error") {
+        throw new Error(event.detail || "Smart Import failed.");
+      } else if (event.stage === "done") {
+        result = event.result;
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line) handleEvent(JSON.parse(line));
+      }
+    }
+    if (!result) {
+      throw new Error("Smart Import ended without a result — check the server log.");
+    }
     const parts = [
       `Found ${result.panos_found} pano${result.panos_found === 1 ? "" : "s"} (${result.normal_skipped} other photos ignored).`,
       `${result.duplicates_skipped} duplicate${result.duplicates_skipped === 1 ? "" : "s"} skipped.`,
@@ -3210,6 +3265,7 @@ async function runSmartExport() {
     "Upload to FTP",
     "Archive locally",
   ]);
+  elements.smartProgressLiveText.textContent = "Renaming, registering, uploading…";
   try {
     const result = await api("/api/smart/export", {
       method: "POST",
