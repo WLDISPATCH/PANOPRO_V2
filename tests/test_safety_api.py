@@ -111,7 +111,8 @@ class SafetyApiTests(unittest.TestCase):
         payload = self.import_with_metadata([first, bad], error_paths={str(bad)})
 
         self.assertEqual(
-            payload["summary"], {"imported": 0, "duplicates": 1, "errors": 1}
+            payload["summary"],
+            {"imported": 0, "duplicates": 1, "errors": 1, "non_pano_skipped": 0},
         )
         statuses = {item["path"]: item["status"] for item in payload["results"]}
         self.assertEqual(statuses[str(first)], "duplicate")
@@ -125,7 +126,8 @@ class SafetyApiTests(unittest.TestCase):
         payload = self.import_with_metadata([first, second])
 
         self.assertEqual(
-            payload["summary"], {"imported": 2, "duplicates": 0, "errors": 0}
+            payload["summary"],
+            {"imported": 2, "duplicates": 0, "errors": 0, "non_pano_skipped": 0},
         )
         imported = payload["imported"]
         self.assertEqual(len(imported), 2)

@@ -2911,7 +2911,10 @@ async function importPhotos(paths) {
     },
   );
   const summary = payload?.summary || {};
-  setStatus(`Import complete. ${summary.imported || 0} imported, ${summary.duplicates || 0} duplicates skipped, ${summary.errors || 0} errors.`);
+  const nonPano = summary.non_pano_skipped
+    ? ` ${summary.non_pano_skipped} raw/non-pano file${summary.non_pano_skipped === 1 ? "" : "s"} ignored.`
+    : "";
+  setStatus(`Import complete. ${summary.imported || 0} imported, ${summary.duplicates || 0} duplicates skipped, ${summary.errors || 0} errors.${nonPano}`);
   setTab("photos");
 }
 
