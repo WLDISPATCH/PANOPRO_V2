@@ -145,7 +145,6 @@ const elements = {
   photoFolderInput: document.getElementById("photo-folder-input"),
   photosTable: document.getElementById("photos-table"),
   processedTable: document.getElementById("processed-table"),
-  photoFilter: document.getElementById("photo-filter"),
   pendingCount: document.getElementById("pending-count"),
   pendingGuidance: document.getElementById("pending-guidance"),
   pendingTotalCount: document.getElementById("pending-total-count"),
@@ -153,13 +152,9 @@ const elements = {
   pendingAttentionCount: document.getElementById("pending-attention-count"),
   pendingNearestCount: document.getElementById("pending-nearest-count"),
   pendingMetadataCount: document.getElementById("pending-metadata-count"),
-  pendingSearch: document.getElementById("pending-search"),
   photosHeaderRow: document.getElementById("photos-header-row"),
   importPhotosButton: document.getElementById("import-photos-button"),
   importFolderButton: document.getElementById("import-folder-button"),
-  pendingShowOriginalToggle: document.getElementById("pending-show-original-toggle"),
-  pendingShowDateToggle: document.getElementById("pending-show-date-toggle"),
-  pendingShowProposedToggle: document.getElementById("pending-show-proposed-toggle"),
   selectAllPendingButton: document.getElementById("select-all-pending-button"),
   removeSelectedPendingButton: document.getElementById("remove-selected-pending-button"),
   selectAllProcessedButton: document.getElementById("select-all-processed-button"),
@@ -186,9 +181,6 @@ const elements = {
   viewerCaptureDate: document.getElementById("viewer-capture-date"),
   viewerReviewStatus: document.getElementById("viewer-review-status"),
   viewerArchiveStatus: document.getElementById("viewer-archive-status"),
-  viewerTagsCount: document.getElementById("viewer-tags-count"),
-  viewerIssuesCount: document.getElementById("viewer-issues-count"),
-  viewerNotesCount: document.getElementById("viewer-notes-count"),
   viewerStageTitle: document.getElementById("viewer-stage-title"),
   viewerStageBadge: document.getElementById("viewer-stage-badge"),
   viewerEmptyState: document.getElementById("viewer-empty-state"),
@@ -198,28 +190,8 @@ const elements = {
   viewerFullscreenButton: document.getElementById("viewer-fullscreen-button"),
   viewerPrevButton: document.getElementById("viewer-prev-button"),
   viewerNextButton: document.getElementById("viewer-next-button"),
-  viewerOpenFileButton: document.getElementById("viewer-open-file-button"),
-  viewerOpenFolderButton: document.getElementById("viewer-open-folder-button"),
-  viewerRevealButton: document.getElementById("viewer-reveal-button"),
-  viewerNorthOffset: document.getElementById("viewer-north-offset"),
-  viewerDefaultYaw: document.getElementById("viewer-default-yaw"),
-  saveViewerStateButton: document.getElementById("save-viewer-state-button"),
-  viewerTagsList: document.getElementById("viewer-tags-list"),
-  viewerTagsBadge: document.getElementById("viewer-tags-badge"),
-  viewerTagName: document.getElementById("viewer-tag-name"),
-  addViewerTagButton: document.getElementById("add-viewer-tag-button"),
-  annotationLabel: document.getElementById("annotation-label"),
-  addAnnotationButton: document.getElementById("add-annotation-button"),
-  viewerAnnotationsList: document.getElementById("viewer-annotations-list"),
-  viewerAnnotationsBadge: document.getElementById("viewer-annotations-badge"),
-  issueTitle: document.getElementById("issue-title"),
-  addIssueButton: document.getElementById("add-issue-button"),
-  viewerIssuesList: document.getElementById("viewer-issues-list"),
-  viewerIssuesBadge: document.getElementById("viewer-issues-badge"),
-  viewerNoteText: document.getElementById("viewer-note-text"),
-  addNoteButton: document.getElementById("add-note-button"),
-  viewerNotesList: document.getElementById("viewer-notes-list"),
-  viewerNotesBadge: document.getElementById("viewer-notes-badge"),
+  viewerSidebar: document.getElementById("viewer-sidebar"),
+  viewerSidebarToggle: document.getElementById("viewer-sidebar-toggle"),
   addHotspotButton: document.getElementById("add-hotspot-button"),
   viewerHotspotsList: document.getElementById("viewer-hotspots-list"),
   viewerHotspotsBadge: document.getElementById("viewer-hotspots-badge"),
@@ -521,8 +493,9 @@ function customSelectNodes(select) {
 }
 
 function closeCustomSelect(selectId = null) {
-  const targets = [elements.projectSelect, elements.photoFilter];
+  const targets = [elements.projectSelect];
   for (const select of targets) {
+    if (!select) continue;
     const id = select.dataset.customSelectId;
     if (selectId && id !== selectId) continue;
     const nodes = customSelectNodes(select);
@@ -1170,22 +1143,7 @@ function renderOverlayLibrary() {
 }
 
 function filteredPhotos() {
-  const filter = elements.photoFilter.value;
-  const search = (state.pendingView.search || "").trim().toLowerCase();
-  let rows = pendingPhotos();
-  if (filter === "ready") rows = rows.filter(photoReadyToRename);
-  if (filter === "attention") rows = rows.filter(photoNeedsAttention);
-  if (filter === "nearest") rows = rows.filter((photo) => photo.match_mode === "nearest");
-  if (filter === "errors") rows = rows.filter((photo) => photo.error || photoHasMetadataIssue(photo));
-  if (search) {
-    rows = rows.filter((photo) => [
-      baseName(photo.original_path),
-      photo.area_name,
-      photo.proposed_filename,
-      photo.error,
-    ].some((value) => String(value || "").toLowerCase().includes(search)));
-  }
-  return rows;
+  return pendingPhotos();
 }
 
 function sortedPendingPhotos(rows) {
@@ -1733,19 +1691,7 @@ function viewerStatusLabel(photo) {
 }
 
 function setViewerCounts(payload = state.viewerPayload) {
-  const photo = payload?.photo || null;
-  const tagCount = photo?.tags?.length || 0;
-  const issueCount = payload?.issues?.length || 0;
-  const noteCount = payload?.notes?.length || 0;
-  const annotationCount = payload?.annotations?.length || 0;
   const hotspotCount = payload?.hotspots?.length || 0;
-  elements.viewerTagsCount.textContent = String(tagCount);
-  elements.viewerIssuesCount.textContent = String(issueCount);
-  elements.viewerNotesCount.textContent = String(noteCount);
-  elements.viewerTagsBadge.textContent = String(tagCount);
-  elements.viewerIssuesBadge.textContent = String(issueCount);
-  elements.viewerNotesBadge.textContent = String(noteCount);
-  elements.viewerAnnotationsBadge.textContent = String(annotationCount);
   elements.viewerHotspotsBadge.textContent = String(hotspotCount);
 }
 
@@ -1764,7 +1710,6 @@ function renderViewerEmptyState() {
   elements.viewerDetailStatus.className = "badge warn";
   elements.viewerDetailsBody.innerHTML = `
     <div><span>Next step</span><strong>Select a pano from Processed, Archive, Collections, Review, or Map.</strong></div>
-    <div><span>Workspace</span><strong>The viewer keeps orientation, tags, notes, issues, annotations, and hotspots together.</strong></div>
   `;
   elements.viewerEmptyState.hidden = false;
   setViewerCounts(null);
@@ -1799,17 +1744,6 @@ function renderViewerDetails(payload) {
 }
 
 function renderViewerLists(payload) {
-  const photo = payload.photo;
-  elements.viewerTagsList.innerHTML = (photo.tags || []).map((tag) => `<span class="mini-pill">${tag.name}</span>`).join("") || `<div class="muted">No tags yet.</div>`;
-  elements.viewerAnnotationsList.innerHTML = payload.annotations.map((item) => `
-    <div class="stack-item compact review-item"><strong>${item.label || "Annotation"}</strong><span>${item.annotation_type || "marker"}</span></div>
-  `).join("") || `<div class="muted">No annotations yet. Add a marker to call out a feature.</div>`;
-  elements.viewerIssuesList.innerHTML = payload.issues.map((item) => `
-    <div class="stack-item compact review-item"><strong>${item.title}</strong><span>${item.status || "open"} · ${item.severity || "medium"}</span></div>
-  `).join("") || `<div class="muted">No issues logged for this pano.</div>`;
-  elements.viewerNotesList.innerHTML = payload.notes.map((item) => `
-    <div class="stack-item compact review-item"><strong>${item.note_text}</strong><span>${fmtDate(item.created_at)}</span></div>
-  `).join("") || `<div class="muted">No notes yet. Add observations from the review.</div>`;
   elements.viewerHotspotsList.innerHTML = payload.hotspots.map((item) => `
     <div class="stack-item compact review-item"><strong>${item.label || `Pano ${item.target_photo_id}`}</strong><span>Target pano #${item.target_photo_id}${item.disabled ? " · disabled" : ""}</span></div>
   `).join("") || `<div class="muted">No hotspots yet. Add pano-to-pano navigation links.</div>`;
@@ -1845,18 +1779,10 @@ function renderViewer() {
   const payload = state.viewerPayload;
   if (!payload) {
     renderViewerEmptyState();
-    elements.viewerTagsList.innerHTML = `<div class="muted">No pano selected.</div>`;
-    elements.viewerAnnotationsList.innerHTML = `<div class="muted">No pano selected.</div>`;
-    elements.viewerIssuesList.innerHTML = `<div class="muted">No pano selected.</div>`;
-    elements.viewerNotesList.innerHTML = `<div class="muted">No pano selected.</div>`;
     elements.viewerHotspotsList.innerHTML = `<div class="muted">No pano selected.</div>`;
     elements.viewerPrevButton.disabled = true;
     elements.viewerNextButton.disabled = true;
-    elements.viewerOpenFileButton.disabled = true;
-    elements.viewerOpenFolderButton.disabled = true;
-    elements.viewerRevealButton.disabled = true;
     elements.viewerOpenMapButton.disabled = true;
-    elements.saveViewerStateButton.disabled = true;
     if (elements.viewerFullscreenButton) {
       elements.viewerFullscreenButton.disabled = true;
     }
@@ -1865,18 +1791,11 @@ function renderViewer() {
   syncViewer360("viewer", elements.viewer360Container, payload);
   renderViewerDetails(payload);
   renderViewerLists(payload);
-  const pose = poseDefaults(payload.photo);
-  elements.viewerNorthOffset.value = pose.northOffset;
-  elements.viewerDefaultYaw.value = Number(pose.yaw).toFixed(1);
   const index = currentViewerIndex();
   const sequence = viewerSequence();
   elements.viewerPrevButton.disabled = index <= 0;
   elements.viewerNextButton.disabled = index < 0 || index >= sequence.length - 1;
-  elements.viewerOpenFileButton.disabled = false;
-  elements.viewerOpenFolderButton.disabled = false;
-  elements.viewerRevealButton.disabled = false;
   elements.viewerOpenMapButton.disabled = false;
-  elements.saveViewerStateButton.disabled = false;
   if (elements.viewerFullscreenButton) {
     elements.viewerFullscreenButton.disabled = false;
     elements.viewerFullscreenButton.textContent = "Full Screen";
@@ -3365,18 +3284,6 @@ async function loadViewer(photoId, source = "viewer", collectionId = null) {
   }
 }
 
-function liveViewerPose() {
-  const handle = state.viewer360.viewer || state.viewer360.collection;
-  if (handle) {
-    try {
-      return handle.getPosition();
-    } catch (_error) {
-      // fall through to defaults
-    }
-  }
-  return poseDefaults(viewerPhoto());
-}
-
 async function stepViewer(delta, source = state.viewerContext.source) {
   const sequence = viewerSequence();
   const index = currentViewerIndex();
@@ -3386,56 +3293,8 @@ async function stepViewer(delta, source = state.viewerContext.source) {
   await loadViewer(next.id, source, state.viewerContext.collectionId);
 }
 
-async function saveViewerState() {
-  const photo = viewerPhoto();
-  if (!photo) return;
-  // Capture whatever the user is currently looking at, so "Save Orientation"
-  // stores the live view as the pano's default.
-  const pose = liveViewerPose();
-  const yawInput = elements.viewerDefaultYaw.value;
-  await api(`/api/photos/${photo.id}/viewer-state`, {
-    method: "PUT",
-    body: JSON.stringify({
-      north_offset: Number(elements.viewerNorthOffset.value || 0),
-      default_yaw: Number(yawInput !== "" ? yawInput : pose.yaw || 0),
-      default_pitch: pose.pitch || 0,
-      default_fov: pose.fov || 75,
-    }),
-  });
-  await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
-  setStatus("Saved pano orientation.");
-}
-
-function findOrCreateTagIdByName(name) {
-  const normalized = name.trim();
-  const existing = state.tags.find((tag) => tag.name.toLowerCase() === normalized.toLowerCase());
-  if (existing) return Promise.resolve(existing.id);
-  return api("/api/tags", {
-    method: "POST",
-    body: JSON.stringify({ name: normalized }),
-  }).then((tag) => {
-    state.tags.push(tag);
-    return tag.id;
-  });
-}
-
-async function addViewerTag() {
-  const photo = viewerPhoto();
-  const name = elements.viewerTagName.value.trim();
-  if (!photo || !name) return;
-  const tagId = await findOrCreateTagIdByName(name);
-  await api(`/api/photos/${photo.id}/tags`, {
-    method: "POST",
-    body: JSON.stringify({ tag_ids: [tagId] }),
-  });
-  elements.viewerTagName.value = "";
-  await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
-  await refreshProjectData();
-  setStatus(`Added tag "${name}".`);
-}
-
 // Arm a placement: the next click on the pano supplies the exact yaw/pitch
-// for the new annotation/issue/hotspot (handleViewerClick below).
+// for the new hotspot (handleViewerClick below).
 function armPlacement(kind, payload) {
   state.placementMode = { kind, payload };
   setStatus("Click the spot on the pano to place it. Press Esc to cancel.");
@@ -3450,80 +3309,24 @@ function cancelPlacement() {
 async function handleViewerClick(slot, yaw, pitch) {
   const placement = state.placementMode;
   const photo = viewerPhoto();
-  if (!placement || !photo) return;
+  if (!placement || !photo || placement.kind !== "hotspot") return;
   state.placementMode = null;
   try {
-    if (placement.kind === "annotation") {
-      await api(`/api/photos/${photo.id}/annotations`, {
-        method: "POST",
-        body: JSON.stringify({
-          annotation_type: "marker",
-          label: placement.payload.label,
-          yaw,
-          pitch,
-          style: { color: "#f4c542" },
-        }),
-      });
-      setStatus("Added annotation.");
-    } else if (placement.kind === "issue") {
-      await api(`/api/photos/${photo.id}/issues`, {
-        method: "POST",
-        body: JSON.stringify({
-          title: placement.payload.title,
-          severity: "medium",
-          status: "open",
-          yaw,
-          pitch,
-        }),
-      });
-      setStatus("Added issue.");
-    } else if (placement.kind === "hotspot") {
-      await api(`/api/photos/${photo.id}/hotspots`, {
-        method: "POST",
-        body: JSON.stringify({
-          target_photo_id: placement.payload.targetPhotoId,
-          yaw,
-          pitch,
-          label: placement.payload.label,
-        }),
-      });
-      setStatus("Added hotspot.");
-    }
+    await api(`/api/photos/${photo.id}/hotspots`, {
+      method: "POST",
+      body: JSON.stringify({
+        target_photo_id: placement.payload.targetPhotoId,
+        yaw,
+        pitch,
+        label: placement.payload.label,
+      }),
+    });
+    setStatus("Added hotspot.");
     await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
     await refreshProjectData();
   } catch (error) {
     setStatus(error.message, true);
   }
-}
-
-async function addAnnotation() {
-  const photo = viewerPhoto();
-  const label = elements.annotationLabel.value.trim();
-  if (!photo || !label) return;
-  elements.annotationLabel.value = "";
-  armPlacement("annotation", { label });
-}
-
-async function addIssue() {
-  const photo = viewerPhoto();
-  const title = elements.issueTitle.value.trim();
-  if (!photo || !title) return;
-  elements.issueTitle.value = "";
-  armPlacement("issue", { title });
-}
-
-async function addNote() {
-  const photo = viewerPhoto();
-  const noteText = elements.viewerNoteText.value.trim();
-  if (!photo || !noteText) return;
-  await api(`/api/photos/${photo.id}/notes`, {
-    method: "POST",
-    body: JSON.stringify({ note_text: noteText }),
-  });
-  elements.viewerNoteText.value = "";
-  await loadViewer(photo.id, state.viewerContext.source, state.viewerContext.collectionId);
-  await refreshProjectData();
-  setStatus("Added note.");
 }
 
 async function addHotspot() {
@@ -3561,19 +3364,6 @@ function openViewerPhotoOnMap() {
   focusPhotoOnMap(photo.id);
 }
 
-async function openSelectedViewerPath(mode) {
-  const photo = viewerPhoto();
-  if (!photo) return;
-  if (mode === "folder") {
-    await openDesktopPath(photo.original_path, "folder");
-    return;
-  }
-  if (mode === "reveal") {
-    await openDesktopPath(photo.original_path, "reveal");
-    return;
-  }
-  await openDesktopPath(photo.original_path, "open");
-}
 
 async function exportCollection(kind) {
   if (!state.currentCollectionId) return;
@@ -3816,14 +3606,6 @@ function handleMapDetailFocusOut(event) {
   }, 0);
 }
 
-function handlePendingViewChange() {
-  state.pendingView.search = elements.pendingSearch.value;
-  state.pendingView.showOriginal = elements.pendingShowOriginalToggle.checked;
-  state.pendingView.showDate = elements.pendingShowDateToggle.checked;
-  state.pendingView.showProposed = elements.pendingShowProposedToggle.checked;
-  syncCustomSelect(elements.photoFilter);
-  renderPhotos();
-}
 
 function handleMapVisibilityChange() {
   state.mapVisibility.showProcessed = elements.mapShowProcessedToggle.checked;
@@ -4026,9 +3808,8 @@ async function bootstrap() {
     state.busyDepth = 0;
     setHoverSuppressed(false);
     ensureCustomSelect(elements.projectSelect);
-    ensureCustomSelect(elements.photoFilter);
     renderPendingHeader();
-    handlePendingViewChange();
+    renderPhotos();
     handleMapVisibilityChange();
     handleMapLabelToggleChange();
     ensureBridge();
@@ -4202,35 +3983,16 @@ elements.exportCollectionCsvButton.addEventListener("click", () => {
 elements.exportCollectionPdfButton.addEventListener("click", () => {
   exportCollection("pdf").catch((error) => setStatus(error.message, true));
 });
-elements.saveViewerStateButton.addEventListener("click", () => {
-  saveViewerState().catch((error) => setStatus(error.message, true));
-});
-elements.addViewerTagButton.addEventListener("click", () => {
-  addViewerTag().catch((error) => setStatus(error.message, true));
-});
-elements.addAnnotationButton.addEventListener("click", () => {
-  addAnnotation().catch((error) => setStatus(error.message, true));
-});
-elements.addIssueButton.addEventListener("click", () => {
-  addIssue().catch((error) => setStatus(error.message, true));
-});
-elements.addNoteButton.addEventListener("click", () => {
-  addNote().catch((error) => setStatus(error.message, true));
-});
 elements.addHotspotButton.addEventListener("click", () => {
   addHotspot().catch((error) => setStatus(error.message, true));
 });
 elements.viewerFullscreenButton.addEventListener("click", () => {
   toggleViewerFullscreen();
 });
-elements.viewerOpenFileButton.addEventListener("click", () => {
-  openSelectedViewerPath("open").catch((error) => setStatus(error.message, true));
-});
-elements.viewerOpenFolderButton.addEventListener("click", () => {
-  openSelectedViewerPath("folder").catch((error) => setStatus(error.message, true));
-});
-elements.viewerRevealButton.addEventListener("click", () => {
-  openSelectedViewerPath("reveal").catch((error) => setStatus(error.message, true));
+elements.viewerSidebarToggle.addEventListener("click", () => {
+  const collapsed = elements.viewerSidebar.classList.toggle("is-collapsed");
+  elements.viewerSidebarToggle.textContent = collapsed ? "Show Panel" : "Hide Panel";
+  elements.viewerSidebarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
 });
 elements.viewerOpenMapButton.addEventListener("click", openViewerPhotoOnMap);
 elements.viewerPrevButton.addEventListener("click", () => {
@@ -4251,14 +4013,6 @@ elements.selectAllProcessedButton.addEventListener("click", () => {
 elements.removeSelectedProcessedButton.addEventListener("click", () => {
   removeSelected(processedPhotos()).catch((error) => setStatus(error.message, true));
 });
-elements.photoFilter.addEventListener("change", () => {
-  syncCustomSelect(elements.photoFilter);
-  renderPhotos();
-});
-elements.pendingSearch.addEventListener("input", handlePendingViewChange);
-elements.pendingShowOriginalToggle.addEventListener("change", handlePendingViewChange);
-elements.pendingShowDateToggle.addEventListener("change", handlePendingViewChange);
-elements.pendingShowProposedToggle.addEventListener("change", handlePendingViewChange);
 elements.areasTable.addEventListener("click", (event) => {
   handleAreaAction(event).catch((error) => setStatus(error.message, true));
 });
