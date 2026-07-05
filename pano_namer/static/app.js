@@ -17,6 +17,7 @@ const state = {
   runs: [],
   mapData: null,
   mapDataSerialized: null,
+  selectedOverlayId: null,
   mapDataLoading: false,
   mapDataError: null,
   mapDataRequestKey: null,
@@ -83,8 +84,6 @@ const elements = {
   refreshButton: document.getElementById("refresh-button"),
   deleteProjectButton: document.getElementById("delete-project-button"),
   overlayImportButton: document.getElementById("overlay-import-button"),
-  overlayReplaceButton: document.getElementById("overlay-replace-button"),
-  overlayEmptyImportButton: document.getElementById("overlay-empty-import-button"),
   overlayWorkspace: document.getElementById("overlay-workspace"),
   overlayEmptyState: document.getElementById("overlay-empty-state"),
   overlayLibraryCard: document.getElementById("overlay-library-card"),
@@ -1131,10 +1130,6 @@ function renderOverlayLibrary() {
   const status = overlayStatus();
 
   elements.overlayImportButton.disabled = !hasTemplate;
-  elements.overlayReplaceButton.disabled = !hasTemplate || !hasOverlay;
-  elements.overlayEmptyImportButton.disabled = !hasTemplate;
-  elements.overlayImportButton.textContent = hasOverlay ? "Import More Overlays" : "Import Overlay File";
-  elements.overlayReplaceButton.textContent = "Import More Overlays";
 
   elements.overlayEmptyState.hidden = hasOverlay;
   elements.overlayLibraryCard.hidden = !hasOverlay;
@@ -1146,9 +1141,7 @@ function renderOverlayLibrary() {
         <h3>Create a template first.</h3>
         <p>Select or create a template before importing a site map overlay.</p>
       </div>
-      <button id="overlay-empty-import-button" type="button" disabled>Import Overlay File</button>
     `;
-    elements.overlayEmptyImportButton = document.getElementById("overlay-empty-import-button");
     return;
   }
 
@@ -1157,14 +1150,9 @@ function renderOverlayLibrary() {
       <div>
         <p class="eyebrow">Overlay Workspace</p>
         <h3>No overlay loaded yet.</h3>
-        <p>Import a PDF or supported overlay file to add map context.</p>
+        <p>Use Add Overlay to import a PDF or supported overlay file for map context.</p>
       </div>
-      <button id="overlay-empty-import-button" type="button">Import Overlay File</button>
     `;
-    elements.overlayEmptyImportButton = document.getElementById("overlay-empty-import-button");
-    elements.overlayEmptyImportButton.addEventListener("click", () => {
-      importOverlay().catch((error) => setStatus(error.message, true));
-    });
     return;
   }
 
@@ -2375,11 +2363,35 @@ function leafletDataKey() {
   ].join("|");
 }
 
+function activeMapOverlay() {
+  if (state.selectedOverlayId) {
+    const chosen = (state.overlays || []).find((item) => item.id === state.selectedOverlayId);
+    if (chosen) return chosen;
+  }
+  return state.mapData?.overlay || null;
+}
+
+function renderMapOverlayPicker() {
+  const picker = document.getElementById("map-overlay-picker");
+  const select = document.getElementById("map-overlay-select");
+  if (!picker || !select) return;
+  const overlays = state.overlays || [];
+  picker.hidden = overlays.length < 2;
+  if (overlays.length < 2) return;
+  const active = activeMapOverlay();
+  select.innerHTML = overlays
+    .map((item) => `<option value="${item.id}">${overlayDisplayName(item)}</option>`)
+    .join("");
+  if (active) {
+    select.value = String(active.id);
+  }
+}
+
 function syncOverlayLayer(leaf) {
   // The overlay layer has its own identity key: rebuilding it is expensive
   // (tile refetches, or a giant PNG re-decode on the imageOverlay fallback)
   // and only necessary when a different overlay/source is shown.
-  const overlay = state.mapData?.overlay;
+  const overlay = activeMapOverlay();
   const usable = overlay?.bounds && (overlay.tile_url || overlay.image_url);
   const key = usable
     ? `${overlay.id}|${overlay.tile_url || overlay.image_url}|${JSON.stringify(overlay.bounds)}`
@@ -2542,6 +2554,7 @@ function renderMap() {
   elements.mapCanvas.classList.toggle("is-draw-mode", state.drawArea.active);
   elements.drawAreaButton.classList.toggle("is-active", state.drawArea.active);
   renderMapSummary();
+  renderMapOverlayPicker();
 
   if (!state.currentProjectId) {
     setMapStateOverlay("No template selected", "Create or select a template before reviewing site map data.");
@@ -4099,6 +4112,7 @@ elements.projectForm.addEventListener("submit", (event) => {
 elements.projectSelect.addEventListener("change", () => {
   syncCustomSelect(elements.projectSelect);
   state.currentProjectId = Number(elements.projectSelect.value) || null;
+  state.selectedOverlayId = null;
   queueMapRefit();
   resetDrawArea();
   state.collapsedProcessedGroups = new Set();
@@ -4114,8 +4128,9 @@ elements.deleteProjectButton.addEventListener("click", () => {
 elements.overlayImportButton.addEventListener("click", () => {
   importOverlay().catch((error) => setStatus(error.message, true));
 });
-elements.overlayReplaceButton.addEventListener("click", () => {
-  importOverlay().catch((error) => setStatus(error.message, true));
+document.getElementById("map-overlay-select").addEventListener("change", (event) => {
+  state.selectedOverlayId = Number(event.target.value) || null;
+  renderMap();
 });
 elements.overlayWorkspace.addEventListener("click", (event) => {
   const button = event.target.closest("[data-overlay-action]");

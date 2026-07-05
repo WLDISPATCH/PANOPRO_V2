@@ -2617,3 +2617,18 @@ details.settings-collapse > summary:hover {
 .settings-collapse-nested > summary {
   font-size: 0.9rem !important;
 }
+
+.map-overlay-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.map-overlay-picker select {
+  min-height: 36px;
+  padding: 6px 10px;
+  max-width: 220px;
+}
