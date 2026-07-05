@@ -2899,15 +2899,49 @@ async function importPhotos(paths) {
   if (!requireCurrentProject("import photos") || !paths.length) return;
   const payload = await withBusy(
     "Importing photos…",
-    "Scanning the selected files and folders, reading metadata, and matching areas.",
+    "Scanning the selected files and folders…",
     async () => {
-      const response = await api(`/api/projects/${state.currentProjectId}/photos/import`, {
+      const response = await fetch(`/api/projects/${state.currentProjectId}/photos/import/stream`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paths }),
-        timeoutMs: 0,
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail || `Import failed (HTTP ${response.status}).`);
+      }
+      let summary = null;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const handleEvent = (event) => {
+        if (event.stage === "scan") {
+          elements.busyDetail.textContent = `Scanning folders: ${event.scanned} of ${event.total} files checked — ${event.accepted} pano${event.accepted === 1 ? "" : "s"} accepted`;
+        } else if (event.stage === "import") {
+          elements.busyDetail.textContent = `Importing: ${event.processed} of ${event.total} photos processed`;
+        } else if (event.stage === "error") {
+          throw new Error(event.detail || "Import failed.");
+        } else if (event.stage === "done") {
+          summary = event.summary;
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline;
+        while ((newline = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (line) handleEvent(JSON.parse(line));
+        }
+      }
+      if (!summary) {
+        throw new Error("Import ended without a result — check the server log.");
+      }
+      elements.busyDetail.textContent = "Matching areas and refreshing the workspace…";
       await refreshProjectData();
-      return response;
+      return { summary };
     },
   );
   const summary = payload?.summary || {};
