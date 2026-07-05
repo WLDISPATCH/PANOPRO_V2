@@ -56,7 +56,57 @@ def enable_crash_logging(log_path: Path = _DESKTOP_LOG_FILE) -> Path | None:
     sys.excepthook = log_exception
     threading.excepthook = log_thread_exception
     atexit.register(handle.flush)
+    _append_recent_windows_faults(handle)
     return log_path
+
+
+def _append_recent_windows_faults(handle) -> None:
+    """Record the faulting module of recent native crashes into the log.
+
+    A native access violation (e.g. inside Qt6WebEngineCore.dll) is caught by
+    faulthandler as a thread dump, but the dump can't name the guilty DLL —
+    only Windows' Application event log records "Faulting module name". On
+    startup we pull the last day's Application Error entries for our Python
+    process and append them, so the crash log is self-contained and no one
+    has to open Event Viewer. Runs in a background thread so it never delays
+    launch.
+    """
+    if sys.platform != "win32":
+        return
+
+    def worker() -> None:
+        script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "Get-WinEvent -FilterHashtable @{LogName='Application';"
+            "ProviderName='Application Error';Level=2;"
+            "StartTime=(Get-Date).AddHours(-24)} |"
+            " Where-Object { $_.Message -match 'python' } |"
+            " Select-Object -First 5 | ForEach-Object {"
+            " $line = ($_.Message -split \"`r?`n\" |"
+            " Select-String 'Faulting (module name|application name)') -join ' ';"
+            " $_.TimeCreated.ToString('s') + '  ' + $line }"
+        )
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return
+        output = (result.stdout or "").strip()
+        if not output:
+            return
+        try:
+            handle.write("--- recent Windows faulting modules (Application event log) ---\n")
+            handle.write(output + "\n")
+            handle.flush()
+        except OSError:
+            pass
+
+    threading.Thread(target=worker, name="fault-log-scan", daemon=True).start()
 
 
 def ensure_std_streams() -> None:

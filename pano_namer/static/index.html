@@ -146,36 +146,6 @@
             <span class="count-chip"><b id="pending-nearest-count">0</b> Nearest</span>
             <span class="count-chip warn"><b id="pending-metadata-count">0</b> Metadata</span>
           </div>
-          <div class="process-toolbar-controls">
-            <label>
-              <span>Filter</span>
-              <select id="photo-filter">
-                <option value="all">All pending</option>
-                <option value="ready">Ready</option>
-                <option value="attention">Needs attention</option>
-                <option value="nearest">Nearest only</option>
-                <option value="errors">Errors only</option>
-              </select>
-            </label>
-            <label>
-              <span>Search</span>
-              <input id="pending-search" type="search" placeholder="Filename or area">
-            </label>
-            <div class="pending-column-toggles">
-              <label class="toggle-chip">
-                <input id="pending-show-original-toggle" type="checkbox" checked>
-                <span>Original Name</span>
-              </label>
-              <label class="toggle-chip">
-                <input id="pending-show-date-toggle" type="checkbox" checked>
-                <span>Date Taken</span>
-              </label>
-              <label class="toggle-chip">
-                <input id="pending-show-proposed-toggle" type="checkbox" checked>
-                <span>Proposed Name</span>
-              </label>
-            </div>
-          </div>
         </div>
 
         <div class="pending-review-layout">
@@ -303,10 +273,6 @@
               </div>
             </div>
             <aside id="map-detail" class="map-detail map-selection-card">
-              <div class="map-detail-head">
-                <p class="eyebrow">Selection</p>
-                <h3>Selected Pano</h3>
-              </div>
               <div id="map-detail-body">Select a pano point on the map or a photo row to inspect details.</div>
             </aside>
           </div>
@@ -319,9 +285,6 @@
             <span class="status-chip">Area: <b id="viewer-area-name">-</b> <small id="viewer-match-mode">No match loaded</small></span>
             <span class="status-chip">Captured: <b id="viewer-capture-date">-</b></span>
             <span class="status-chip">Review: <b id="viewer-review-status">-</b> <small id="viewer-archive-status">Archive state</small></span>
-            <span class="status-chip"><b id="viewer-tags-count">0</b> Tags</span>
-            <span class="status-chip"><b id="viewer-issues-count">0</b> Issues</span>
-            <span class="status-chip"><b id="viewer-notes-count">0</b> Notes</span>
           </div>
 
           <div class="viewer-command-bar" aria-label="Viewer commands">
@@ -332,10 +295,7 @@
               <button id="viewer-fullscreen-button" type="button">Full Screen</button>
             </div>
             <div class="viewer-command-group">
-              <span>Desktop</span>
-              <button id="viewer-open-file-button" class="secondary" type="button">Open File</button>
-              <button id="viewer-open-folder-button" class="secondary" type="button">Open Folder</button>
-              <button id="viewer-reveal-button" class="secondary" type="button">Reveal in Explorer</button>
+              <button id="viewer-sidebar-toggle" class="secondary" type="button" aria-expanded="true">Hide Panel</button>
             </div>
           </div>
 
@@ -353,61 +313,22 @@
               </div>
               <div id="viewer-empty-state" class="viewer-empty-state">Select a processed or archived pano from Process, Library, or the Map to start a 360 inspection.</div>
             </div>
-            <aside class="viewer-sidebar viewer-review-sidebar">
-              <section class="viewer-card viewer-details-card">
-                <div class="viewer-card-head"><h3>Pano Details</h3><span id="viewer-detail-status" class="badge warn">No selection</span></div>
+            <aside class="viewer-sidebar viewer-review-sidebar" id="viewer-sidebar">
+              <details class="viewer-card viewer-collapse" open>
+                <summary><h3>Pano Details</h3><span id="viewer-detail-status" class="badge warn">No selection</span></summary>
                 <div id="viewer-details-body" class="viewer-detail-grid"></div>
                 <div class="detail-actions viewer-detail-actions">
                   <button id="viewer-open-map-button" class="secondary" type="button">Open Map</button>
                 </div>
-              </section>
-              <section class="viewer-card orientation-card">
-                <div class="viewer-card-head"><h3>Orientation</h3><span class="badge">Viewer State</span></div>
-                <p class="viewer-helper">North offset aligns the compass overlay. Default yaw controls the starting view when this pano opens.</p>
-                <div class="orientation-grid">
-                  <label><span>North Offset</span><input id="viewer-north-offset" type="number" step="1"></label>
-                  <label><span>Default Yaw</span><input id="viewer-default-yaw" type="number" step="1"></label>
-                </div>
-                <button id="save-viewer-state-button" type="button">Save Orientation</button>
-              </section>
-              <section class="viewer-card">
-                <div class="viewer-card-head"><h3>Tags</h3><span id="viewer-tags-badge" class="badge">0</span></div>
-                <div id="viewer-tags-list" class="pill-list"></div>
-                <div class="detail-actions input-action-row">
-                  <input id="viewer-tag-name" type="text" placeholder="Add tag">
-                  <button id="add-viewer-tag-button" type="button">Add Tag</button>
-                </div>
-              </section>
-              <section class="viewer-card">
-                <div class="viewer-card-head"><h3>Notes</h3><span id="viewer-notes-badge" class="badge">0</span></div>
-                <textarea id="viewer-note-text" rows="3" placeholder="Add review note or field observation"></textarea>
-                <button id="add-note-button" type="button">Add Note</button>
-                <div id="viewer-notes-list" class="stack-list compact review-list"></div>
-              </section>
-              <section class="viewer-card">
-                <div class="viewer-card-head"><h3>Issues</h3><span id="viewer-issues-badge" class="badge warn">0</span></div>
-                <div class="detail-actions input-action-row">
-                  <input id="issue-title" type="text" placeholder="Issue title">
-                  <button id="add-issue-button" type="button">Add Issue</button>
-                </div>
-                <div id="viewer-issues-list" class="stack-list compact review-list"></div>
-              </section>
-              <section class="viewer-card">
-                <div class="viewer-card-head"><h3>Annotations</h3><span id="viewer-annotations-badge" class="badge">0</span></div>
-                <div class="detail-actions input-action-row">
-                  <input id="annotation-label" type="text" placeholder="Annotation label">
-                  <button id="add-annotation-button" type="button">Add Marker</button>
-                </div>
-                <div id="viewer-annotations-list" class="stack-list compact review-list"></div>
-              </section>
-              <section class="viewer-card">
-                <div class="viewer-card-head"><h3>Hotspots</h3><span id="viewer-hotspots-badge" class="badge">0</span></div>
+              </details>
+              <details class="viewer-card viewer-collapse">
+                <summary><h3>Hotspots</h3><span id="viewer-hotspots-badge" class="badge">0</span></summary>
                 <p class="viewer-helper">Hotspots support pano-to-pano navigation from within the 360 scene.</p>
                 <div class="detail-actions">
                   <button id="add-hotspot-button" type="button">Add Hotspot</button>
                 </div>
                 <div id="viewer-hotspots-list" class="stack-list compact review-list"></div>
-              </section>
+              </details>
             </aside>
           </div>
         </div>

@@ -823,11 +823,30 @@ button.secondary,
 
 /* Photo Sphere Viewer mount point (WebGL 360 viewer). */
 .viewer-360 {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 360px;
   display: block;
   background: #0c192a;
+}
+
+.viewer-360-psv {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+}
+
+/* Flat overlay for raw frames — sits above the (idle, never-destroyed) 360
+   viewer so we don't churn the WebGL context. */
+.viewer-360-flat {
+  position: absolute;
+  inset: 0;
+  background: #0c192a;
+}
+
+.viewer-360-flat[hidden] {
+  display: none;
 }
 
 .viewer-360 .psv-hotspot {
@@ -2132,29 +2151,53 @@ button:disabled:hover {
   position: relative;
 }
 
-.map-selected-summary {
+.map-selected-summary,
+.map-selected-title {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 10px;
 }
 
-.map-selected-summary strong {
+.map-selected-summary strong,
+.map-selected-title strong {
   display: block;
   color: var(--ink);
   overflow-wrap: anywhere;
 }
 
-.map-selected-summary span {
+.map-selected-summary span,
+.map-selected-title span {
   color: var(--muted);
   font-size: 0.78rem;
 }
 
-.map-detail-head {
-  margin-bottom: 8px;
+.map-detail-actions {
+  margin: 12px 0 0;
 }
 
-.map-detail-actions {
+/* Selection-card details are collapsed by default to keep the panel simple. */
+.map-info-dropdown {
   margin: 12px 0;
+}
+
+.map-info-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.map-detail-stack {
+  display: none;
+  margin-top: 10px;
+}
+
+.map-detail-stack.is-open {
+  display: flex;
+}
+
+.map-remove-action {
+  width: 100%;
 }
 
 .map-detail-error strong,
@@ -2259,6 +2302,52 @@ button:disabled:hover {
 .viewer-review-sidebar {
   min-height: 0;
   overflow: auto;
+}
+
+/* Slide-out panel: collapsing the sidebar gives the 360 stage the full width. */
+.viewer-review-sidebar.is-collapsed {
+  display: none;
+}
+
+.viewer-review-layout:has(.viewer-review-sidebar.is-collapsed) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Collapsible viewer cards (Pano Details, Hotspots). */
+details.viewer-collapse {
+  display: block;
+  padding: 16px;
+}
+
+details.viewer-collapse > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+details.viewer-collapse > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.viewer-collapse > summary h3 {
+  margin: 0;
+}
+
+details.viewer-collapse > summary::after {
+  content: "▾";
+  color: var(--accent);
+}
+
+details.viewer-collapse[open] > summary::after {
+  content: "▴";
+}
+
+details.viewer-collapse[open] > summary {
+  margin-bottom: 10px;
 }
 
 .viewer-card-head {
