@@ -1359,6 +1359,7 @@ function renderPhotos() {
     cells.push(`
       <td>
         <div class="inline-actions queue-actions">
+          <button class="secondary" type="button" data-action="view-360" data-photo-id="${photo.id}">View 360</button>
           <button class="secondary" type="button" data-action="view-map" data-photo-id="${photo.id}">View on Map</button>
           <button class="danger subtle-danger" type="button" data-action="remove-photo" data-photo-id="${photo.id}">Remove</button>
         </div>
@@ -2109,7 +2110,7 @@ function renderMapSelectedDetail(selectedPhoto) {
       ${selectedPhoto.error ? `<div class="map-detail-error"><span>Error</span><strong>${selectedPhoto.error}</strong></div>` : ""}
     </div>
     <div class="detail-actions map-detail-actions">
-      ${selectedPhoto.applied ? `<button data-map-action="open-viewer" type="button">Open Viewer</button>` : ""}
+      <button data-map-action="open-viewer" type="button">Open Viewer</button>
       <button data-map-action="open-source" class="secondary" type="button">Open ${selectedPhoto.applied ? "Processed" : "Pending"}</button>
       ${selectedPhoto.applied ? "" : `<button data-map-action="remove-photo" class="secondary danger" type="button">Remove Photo</button>`}
     </div>
@@ -3715,6 +3716,10 @@ function handlePhotoSelection(event) {
     renderPhotos();
   }
   const actionButton = event.target.closest("[data-action]");
+  if (actionButton?.dataset.action === "view-360") {
+    loadViewer(Number(actionButton.dataset.photoId), "viewer", null).catch((error) => setStatus(error.message, true));
+    return;
+  }
   if (actionButton?.dataset.action === "view-map") {
     focusPhotoOnMap(Number(actionButton.dataset.photoId));
     return;
