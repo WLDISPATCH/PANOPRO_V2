@@ -69,7 +69,16 @@ def _render_pdf_preview(path: Path, preview_dir: Path | None = None) -> tuple[Pa
     document = fitz.open(path)
     try:
         page = document.load_page(0)
-        pixmap = page.get_pixmap(dpi=150, alpha=False)
+        # 150 dpi, but bounded to ~64M pixels: giant sheets otherwise render
+        # gigabyte-scale pixmaps that can hard-kill the process on field
+        # laptops (silent desktop crash on overlay import). This is a memory
+        # guard, not a display cap — the tile pyramid keeps zoom detail.
+        scale = 150 / 72
+        max_pixels = 64_000_000
+        pixels = (page.rect.width * scale) * (page.rect.height * scale)
+        if pixels > max_pixels:
+            scale *= (max_pixels / pixels) ** 0.5
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         pixmap.save(preview_path)
         return preview_path, pixmap.width, pixmap.height
     finally:

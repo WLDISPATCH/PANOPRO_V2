@@ -77,8 +77,7 @@
               <h3>Overlay</h3>
               <p>Georeferenced PDF used for site map context.</p>
               <div class="panel-actions">
-                <button id="overlay-import-button" type="button">Import Overlay File</button>
-                <button id="overlay-replace-button" class="secondary" type="button">Replace Overlay</button>
+                <button id="overlay-import-button" type="button">Add Overlay</button>
               </div>
             </div>
             <div id="overlay-workspace" class="overlay-workspace">
@@ -86,9 +85,8 @@
                 <div>
                   <p class="eyebrow">Overlay Workspace</p>
                   <h3>No overlay loaded yet.</h3>
-                  <p>Import a PDF or supported overlay file to add map context.</p>
+                  <p>Use Add Overlay to import a PDF or supported overlay file for map context.</p>
                 </div>
-                <button id="overlay-empty-import-button" type="button">Import Overlay File</button>
               </section>
               <section id="overlay-library-card" class="overlay-library-card" hidden>
                 <div class="overlay-card-head">
@@ -270,6 +268,10 @@
               <label class="toggle-chip">
                 <input id="map-proposed-label-toggle" type="checkbox" checked>
                 <span>Proposed Name</span>
+              </label>
+              <label class="map-overlay-picker" id="map-overlay-picker" hidden>
+                <span>Overlay</span>
+                <select id="map-overlay-select"></select>
               </label>
             </div>
             <div class="map-command-group">
@@ -716,6 +718,10 @@
         <p id="smart-progress-summary">Working…</p>
       </div>
       <ul id="smart-progress-steps" class="smart-progress-steps"></ul>
+      <div id="smart-progress-live" class="smart-progress-live">
+        <div class="smart-spinner" aria-hidden="true"></div>
+        <span id="smart-progress-live-text">Starting…</span>
+      </div>
       <div class="app-modal-actions">
         <button id="smart-progress-close-button" type="button" disabled>Close</button>
       </div>

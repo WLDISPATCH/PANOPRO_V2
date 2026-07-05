@@ -734,24 +734,39 @@ def resolve_area_color(
     return next_available_area_color(existing_colors)
 
 
-def expand_photo_sources(raw_paths: list[str]) -> list[Path]:
+def expand_photo_sources(raw_paths: list[str]) -> tuple[list[Path], int]:
+    """Expand files/folders into importable photo paths.
+
+    Folder (batch) expansion only accepts stitched 360 panos: DJI cards keep
+    the raw stitch tiles in PANORAMA subfolders, and recursing a card or
+    mission folder used to sweep those in alongside the stitched output.
+    Explicitly selected files are trusted as-is. Returns the paths plus how
+    many non-pano files were skipped so the summary can report it.
+    """
+    from pano_namer.services.sd_card import is_stitched_pano
+
     expanded: list[Path] = []
     seen: set[Path] = set()
+    skipped_non_pano = 0
     for raw_path in raw_paths:
         source_path = ensure_path(raw_path)
         if source_path.is_dir():
             for child in sorted(source_path.rglob("*")):
                 if (
-                    child.is_file()
-                    and child.suffix.lower() in PHOTO_EXTENSIONS
-                    and child not in seen
+                    not child.is_file()
+                    or child.suffix.lower() not in PHOTO_EXTENSIONS
+                    or child in seen
                 ):
-                    expanded.append(child.resolve())
-                    seen.add(child.resolve())
+                    continue
+                if not is_stitched_pano(child):
+                    skipped_non_pano += 1
+                    continue
+                expanded.append(child.resolve())
+                seen.add(child.resolve())
         elif source_path.suffix.lower() in PHOTO_EXTENSIONS and source_path not in seen:
             expanded.append(source_path)
             seen.add(source_path)
-    return expanded
+    return expanded, skipped_non_pano
 
 
 def refresh_pending_photo_matches(conn: sqlite3.Connection, project_id: int) -> None:
@@ -1112,7 +1127,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         "/api/projects/{project_id}/photos/import", response_model=PhotoImportResponse
     )
     def import_photos(project_id: int, payload: PhotoImportRequest) -> dict[str, Any]:
-        return import_photo_paths(project_id, expand_photo_sources(payload.paths))
+        paths, skipped_non_pano = expand_photo_sources(payload.paths)
+        result = import_photo_paths(project_id, paths)
+        result["summary"]["non_pano_skipped"] = skipped_non_pano
+        return result
 
     @app.post(
         "/api/projects/{project_id}/photos/upload", response_model=PhotoImportResponse

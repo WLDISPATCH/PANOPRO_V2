@@ -173,6 +173,42 @@ class TestSmartModeSettings:
         assert smart_mode.load_settings(conn).ftp_protocol == "ftp"
 
 
+class TestBatchImportFiltersRawPhotos:
+    def test_folder_import_skips_raw_tiles(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        from pano_namer.config import AppConfig
+        from pano_namer.main import create_app
+
+        config = AppConfig.load(tmp_path / "data")
+        app = create_app(config)
+        client = TestClient(app)
+        project = client.post("/api/projects", json={"name": "BATCH-FILTER"}).json()
+
+        # A card-like folder: one stitched pano plus raw tiles in PANORAMA.
+        card = tmp_path / "card" / "DCIM" / "DJI_001"
+        pano_dir = card / "PANORAMA"
+        pano_dir.mkdir(parents=True)
+        make_jpeg(card / "DJI_0001_PANO.jpg", 14400, 7200, PANO_XMP)
+        make_jpeg(pano_dir / "DJI_0002.jpg", 4000, 3000)
+        make_jpeg(pano_dir / "DJI_0003.jpg", 4000, 3000)
+
+        result = client.post(
+            f"/api/projects/{project['id']}/photos/import",
+            json={"paths": [str(tmp_path / "card")]},
+        ).json()
+        assert result["summary"]["imported"] == 1
+        assert result["summary"]["non_pano_skipped"] == 2
+
+        # Explicitly selected files are still trusted as-is.
+        explicit = client.post(
+            f"/api/projects/{project['id']}/photos/import",
+            json={"paths": [str(pano_dir / "DJI_0002.jpg")]},
+        ).json()
+        assert explicit["summary"]["imported"] == 1
+        assert explicit["summary"]["non_pano_skipped"] == 0
+
+
 class TestSmartExportArchiveLayout:
     def test_archive_moves_files_into_dated_panos_folder(self, tmp_path):
         from fastapi.testclient import TestClient

@@ -16,6 +16,8 @@ const state = {
   overlays: [],
   runs: [],
   mapData: null,
+  mapDataSerialized: null,
+  selectedOverlayId: null,
   mapDataLoading: false,
   mapDataError: null,
   mapDataRequestKey: null,
@@ -82,8 +84,6 @@ const elements = {
   refreshButton: document.getElementById("refresh-button"),
   deleteProjectButton: document.getElementById("delete-project-button"),
   overlayImportButton: document.getElementById("overlay-import-button"),
-  overlayReplaceButton: document.getElementById("overlay-replace-button"),
-  overlayEmptyImportButton: document.getElementById("overlay-empty-import-button"),
   overlayWorkspace: document.getElementById("overlay-workspace"),
   overlayEmptyState: document.getElementById("overlay-empty-state"),
   overlayLibraryCard: document.getElementById("overlay-library-card"),
@@ -128,6 +128,8 @@ const elements = {
   smartProgressTitle: document.getElementById("smart-progress-title"),
   smartProgressSummary: document.getElementById("smart-progress-summary"),
   smartProgressSteps: document.getElementById("smart-progress-steps"),
+  smartProgressLive: document.getElementById("smart-progress-live"),
+  smartProgressLiveText: document.getElementById("smart-progress-live-text"),
   smartProgressCloseButton: document.getElementById("smart-progress-close-button"),
   appVersionBadge: document.getElementById("app-version-badge"),
   statusPill: document.getElementById("status-pill"),
@@ -1010,8 +1012,15 @@ async function refreshMapData(projectId = state.currentProjectId) {
     if (state.currentProjectId !== projectId || state.mapDataRequestKey !== requestKey) {
       return;
     }
+    // Only bump the version when the payload actually changed; the version
+    // invalidates the Leaflet layer cache, and rebuilding every polygon and
+    // marker after each refresh is what made deletes/tab switches laggy.
+    const serialized = JSON.stringify(mapData);
+    if (state.mapDataSerialized !== serialized) {
+      state.mapDataSerialized = serialized;
+      state.mapDataVersion += 1;
+    }
     state.mapData = mapData;
-    state.mapDataVersion += 1;
     state.mapDataError = null;
   } catch (error) {
     if (state.currentProjectId !== projectId || state.mapDataRequestKey !== requestKey) {
@@ -1123,10 +1132,6 @@ function renderOverlayLibrary() {
   const status = overlayStatus();
 
   elements.overlayImportButton.disabled = !hasTemplate;
-  elements.overlayReplaceButton.disabled = !hasTemplate || !hasOverlay;
-  elements.overlayEmptyImportButton.disabled = !hasTemplate;
-  elements.overlayImportButton.textContent = hasOverlay ? "Import More Overlays" : "Import Overlay File";
-  elements.overlayReplaceButton.textContent = "Import More Overlays";
 
   elements.overlayEmptyState.hidden = hasOverlay;
   elements.overlayLibraryCard.hidden = !hasOverlay;
@@ -1138,9 +1143,7 @@ function renderOverlayLibrary() {
         <h3>Create a template first.</h3>
         <p>Select or create a template before importing a site map overlay.</p>
       </div>
-      <button id="overlay-empty-import-button" type="button" disabled>Import Overlay File</button>
     `;
-    elements.overlayEmptyImportButton = document.getElementById("overlay-empty-import-button");
     return;
   }
 
@@ -1149,14 +1152,9 @@ function renderOverlayLibrary() {
       <div>
         <p class="eyebrow">Overlay Workspace</p>
         <h3>No overlay loaded yet.</h3>
-        <p>Import a PDF or supported overlay file to add map context.</p>
+        <p>Use Add Overlay to import a PDF or supported overlay file for map context.</p>
       </div>
-      <button id="overlay-empty-import-button" type="button">Import Overlay File</button>
     `;
-    elements.overlayEmptyImportButton = document.getElementById("overlay-empty-import-button");
-    elements.overlayEmptyImportButton.addEventListener("click", () => {
-      importOverlay().catch((error) => setStatus(error.message, true));
-    });
     return;
   }
 
@@ -2345,6 +2343,7 @@ function ensureLeafletMap() {
   state.leaflet = {
     map,
     overlayLayer: null,
+    overlayKey: null,
     areaLayer: L.layerGroup().addTo(map),
     photoLayer: L.layerGroup().addTo(map),
     drawLayer: L.layerGroup().addTo(map),
@@ -2366,40 +2365,76 @@ function leafletDataKey() {
   ].join("|");
 }
 
-function syncLeafletLayers(leaf) {
-  const key = leafletDataKey();
-  if (leaf.dataKey === key) return;
-  leaf.dataKey = key;
+function activeMapOverlay() {
+  if (state.selectedOverlayId) {
+    const chosen = (state.overlays || []).find((item) => item.id === state.selectedOverlayId);
+    if (chosen) return chosen;
+  }
+  return state.mapData?.overlay || null;
+}
+
+function renderMapOverlayPicker() {
+  const picker = document.getElementById("map-overlay-picker");
+  const select = document.getElementById("map-overlay-select");
+  if (!picker || !select) return;
+  const overlays = state.overlays || [];
+  picker.hidden = overlays.length < 2;
+  if (overlays.length < 2) return;
+  const active = activeMapOverlay();
+  select.innerHTML = overlays
+    .map((item) => `<option value="${item.id}">${overlayDisplayName(item)}</option>`)
+    .join("");
+  if (active) {
+    select.value = String(active.id);
+  }
+}
+
+function syncOverlayLayer(leaf) {
+  // The overlay layer has its own identity key: rebuilding it is expensive
+  // (tile refetches, or a giant PNG re-decode on the imageOverlay fallback)
+  // and only necessary when a different overlay/source is shown.
+  const overlay = activeMapOverlay();
+  const usable = overlay?.bounds && (overlay.tile_url || overlay.image_url);
+  const key = usable
+    ? `${overlay.id}|${overlay.tile_url || overlay.image_url}|${JSON.stringify(overlay.bounds)}`
+    : null;
+  if (leaf.overlayKey === key) return;
+  leaf.overlayKey = key;
 
   if (leaf.overlayLayer) {
     leaf.map.removeLayer(leaf.overlayLayer);
     leaf.overlayLayer = null;
   }
-  const overlay = state.mapData?.overlay;
-  if (overlay?.bounds && (overlay.tile_url || overlay.image_url)) {
-    const [ox1, oy1, ox2, oy2] = overlay.bounds;
-    const overlayBounds = L.latLngBounds([oy1, ox1], [oy2, ox2]);
-    if (overlay.tile_url) {
-      // Tile pyramid (PMTiles-backed): the GPU only holds visible tiles,
-      // which avoids the oversized-texture compositor corruption that a
-      // single full-resolution imageOverlay causes in the desktop shell.
-      leaf.overlayLayer = L.tileLayer(overlay.tile_url, {
-        bounds: overlayBounds,
-        minNativeZoom: overlay.tile_min_zoom,
-        maxNativeZoom: overlay.tile_max_zoom,
-        minZoom: -12,
-        maxZoom: 12,
-        tileSize: 256,
-        opacity: 0.72,
-        updateWhenZooming: false,
-      }).addTo(leaf.map);
-    } else {
-      leaf.overlayLayer = L.imageOverlay(overlay.image_url, overlayBounds, {
-        opacity: 0.72,
-      }).addTo(leaf.map);
-    }
-    leaf.overlayLayer.bringToBack();
+  if (!usable) return;
+  const [ox1, oy1, ox2, oy2] = overlay.bounds;
+  const overlayBounds = L.latLngBounds([oy1, ox1], [oy2, ox2]);
+  if (overlay.tile_url) {
+    // Tile pyramid (PMTiles-backed): the GPU only holds visible tiles,
+    // which avoids the oversized-texture compositor corruption that a
+    // single full-resolution imageOverlay causes in the desktop shell.
+    leaf.overlayLayer = L.tileLayer(overlay.tile_url, {
+      bounds: overlayBounds,
+      minNativeZoom: overlay.tile_min_zoom,
+      maxNativeZoom: overlay.tile_max_zoom,
+      minZoom: -12,
+      maxZoom: 12,
+      tileSize: 256,
+      opacity: 0.72,
+      updateWhenZooming: false,
+    }).addTo(leaf.map);
+  } else {
+    leaf.overlayLayer = L.imageOverlay(overlay.image_url, overlayBounds, {
+      opacity: 0.72,
+    }).addTo(leaf.map);
   }
+  leaf.overlayLayer.bringToBack();
+}
+
+function syncLeafletLayers(leaf) {
+  syncOverlayLayer(leaf);
+  const key = leafletDataKey();
+  if (leaf.dataKey === key) return;
+  leaf.dataKey = key;
 
   leaf.areaLayer.clearLayers();
   for (const area of state.mapData?.areas || []) {
@@ -2521,6 +2556,7 @@ function renderMap() {
   elements.mapCanvas.classList.toggle("is-draw-mode", state.drawArea.active);
   elements.drawAreaButton.classList.toggle("is-active", state.drawArea.active);
   renderMapSummary();
+  renderMapOverlayPicker();
 
   if (!state.currentProjectId) {
     setMapStateOverlay("No template selected", "Create or select a template before reviewing site map data.");
@@ -2875,7 +2911,10 @@ async function importPhotos(paths) {
     },
   );
   const summary = payload?.summary || {};
-  setStatus(`Import complete. ${summary.imported || 0} imported, ${summary.duplicates || 0} duplicates skipped, ${summary.errors || 0} errors.`);
+  const nonPano = summary.non_pano_skipped
+    ? ` ${summary.non_pano_skipped} raw/non-pano file${summary.non_pano_skipped === 1 ? "" : "s"} ignored.`
+    : "";
+  setStatus(`Import complete. ${summary.imported || 0} imported, ${summary.duplicates || 0} duplicates skipped, ${summary.errors || 0} errors.${nonPano}`);
   setTab("photos");
 }
 
@@ -3104,8 +3143,21 @@ function openSmartProgress(title, steps) {
     if (index === 0) item.classList.add("active");
     elements.smartProgressSteps.appendChild(item);
   });
+  elements.smartProgressLive.hidden = false;
+  elements.smartProgressLiveText.textContent = "Starting…";
   elements.smartProgressCloseButton.disabled = true;
   elements.smartProgressModal.hidden = false;
+}
+
+function setSmartProgressStep(activeIndex, liveText) {
+  [...elements.smartProgressSteps.children].forEach((item, index) => {
+    item.classList.toggle("done", index < activeIndex);
+    item.classList.toggle("active", index === activeIndex);
+    item.classList.remove("error");
+  });
+  if (liveText) {
+    elements.smartProgressLiveText.textContent = liveText;
+  }
 }
 
 function finishSmartProgress(summaryText, failed) {
@@ -3113,6 +3165,7 @@ function finishSmartProgress(summaryText, failed) {
     item.classList.remove("active");
     item.classList.add(failed ? "error" : "done");
   });
+  elements.smartProgressLive.hidden = true;
   elements.smartProgressSummary.textContent = summaryText;
   elements.smartProgressCloseButton.disabled = false;
 }
@@ -3138,11 +3191,50 @@ async function runSmartImport() {
     "Stage panos on the map",
   ]);
   try {
-    const result = await api("/api/smart/import", {
+    const response = await fetch("/api/smart/import/stream", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ project_id: state.currentProjectId }),
-      timeoutMs: 600000,
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.detail || `Smart Import failed (HTTP ${response.status}).`);
+    }
+    let result = null;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const handleEvent = (event) => {
+      if (event.stage === "detect") {
+        setSmartProgressStep(1, `Card found: ${event.source_path}`);
+      } else if (event.stage === "scan") {
+        setSmartProgressStep(1, `Scanned ${event.scanned} of ${event.total} files — ${event.panos} pano${event.panos === 1 ? "" : "s"} found`);
+      } else if (event.stage === "dedupe") {
+        setSmartProgressStep(2, `Checking ${event.checking} pano${event.checking === 1 ? "" : "s"} against the shared registry…`);
+      } else if (event.stage === "copy") {
+        setSmartProgressStep(3, `Accepted ${event.copied} of ${event.processed} checked (${event.duplicates} duplicate${event.duplicates === 1 ? "" : "s"} skipped)`);
+      } else if (event.stage === "stage") {
+        setSmartProgressStep(4, `Staging ${event.total} pano${event.total === 1 ? "" : "s"} on the map…`);
+      } else if (event.stage === "error") {
+        throw new Error(event.detail || "Smart Import failed.");
+      } else if (event.stage === "done") {
+        result = event.result;
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line) handleEvent(JSON.parse(line));
+      }
+    }
+    if (!result) {
+      throw new Error("Smart Import ended without a result — check the server log.");
+    }
     const parts = [
       `Found ${result.panos_found} pano${result.panos_found === 1 ? "" : "s"} (${result.normal_skipped} other photos ignored).`,
       `${result.duplicates_skipped} duplicate${result.duplicates_skipped === 1 ? "" : "s"} skipped.`,
@@ -3176,6 +3268,7 @@ async function runSmartExport() {
     "Upload to FTP",
     "Archive locally",
   ]);
+  elements.smartProgressLiveText.textContent = "Renaming, registering, uploading…";
   try {
     const result = await api("/api/smart/export", {
       method: "POST",
@@ -4078,6 +4171,7 @@ elements.projectForm.addEventListener("submit", (event) => {
 elements.projectSelect.addEventListener("change", () => {
   syncCustomSelect(elements.projectSelect);
   state.currentProjectId = Number(elements.projectSelect.value) || null;
+  state.selectedOverlayId = null;
   queueMapRefit();
   resetDrawArea();
   state.collapsedProcessedGroups = new Set();
@@ -4093,8 +4187,9 @@ elements.deleteProjectButton.addEventListener("click", () => {
 elements.overlayImportButton.addEventListener("click", () => {
   importOverlay().catch((error) => setStatus(error.message, true));
 });
-elements.overlayReplaceButton.addEventListener("click", () => {
-  importOverlay().catch((error) => setStatus(error.message, true));
+document.getElementById("map-overlay-select").addEventListener("change", (event) => {
+  state.selectedOverlayId = Number(event.target.value) || null;
+  renderMap();
 });
 elements.overlayWorkspace.addEventListener("click", (event) => {
   const button = event.target.closest("[data-overlay-action]");

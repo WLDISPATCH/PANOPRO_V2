@@ -2617,3 +2617,46 @@ details.settings-collapse > summary:hover {
 .settings-collapse-nested > summary {
   font-size: 0.9rem !important;
 }
+
+.map-overlay-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.map-overlay-picker select {
+  min-height: 36px;
+  padding: 6px 10px;
+  max-width: 220px;
+}
+
+.smart-progress-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -6px 0 14px;
+  color: var(--muted);
+  font-size: 14px;
+  min-height: 22px;
+}
+
+.smart-progress-live[hidden] {
+  display: none;
+}
+
+.smart-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 3px solid rgba(17, 149, 168, 0.22);
+  border-top-color: var(--accent);
+  animation: smart-spin 0.9s linear infinite;
+}
+
+@keyframes smart-spin {
+  to { transform: rotate(360deg); }
+}
