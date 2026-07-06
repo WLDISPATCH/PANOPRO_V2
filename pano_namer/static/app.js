@@ -1038,6 +1038,14 @@ function queueMapRefit() {
   }
 }
 
+// Areas sorted alphabetically by name for every list/picker (case-insensitive,
+// natural numeric order so Area 2 sorts before Area 10).
+function areasByName() {
+  return [...state.areas].sort((a, b) =>
+    (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base", numeric: true }),
+  );
+}
+
 function renderAreas() {
   if (!state.currentProjectId) {
     elements.areasTable.innerHTML = `<tr><td colspan="6">Create a template first.</td></tr>`;
@@ -1047,7 +1055,7 @@ function renderAreas() {
     elements.areasTable.innerHTML = `<tr><td colspan="6">No areas loaded yet.</td></tr>`;
     return;
   }
-  elements.areasTable.innerHTML = state.areas.map((area) => `
+  elements.areasTable.innerHTML = areasByName().map((area) => `
     <tr>
       <td>${area.name}</td>
       <td>${area.dxf_original_path ? shortPath(area.dxf_original_path) : "Manual only"}</td>
@@ -1226,7 +1234,7 @@ function pendingAreaPickerHtml(photo, scope) {
     state.pendingAreaMenuPhotoId === photo.id && state.pendingAreaMenuScope === scope;
   const options = [
     `<button class="area-option${photo.matched_area_id ? "" : " is-active"}" type="button" data-assign-area-photo-id="${photo.id}" data-assign-area-id="">Unassigned</button>`,
-    ...state.areas.map(
+    ...areasByName().map(
       (area) =>
         `<button class="area-option${area.id === photo.matched_area_id ? " is-active" : ""}" type="button" data-assign-area-photo-id="${photo.id}" data-assign-area-id="${area.id}">${area.name}</button>`,
     ),
@@ -2011,7 +2019,7 @@ function renderMapSelectedDetail(selectedPhoto) {
         Unassigned
       </button>
     `,
-    ...state.areas.map((area) => `
+    ...areasByName().map((area) => `
       <button
         class="area-option ${draftAreaId === area.id ? "is-active" : ""}"
         type="button"
@@ -2037,7 +2045,6 @@ function renderMapSelectedDetail(selectedPhoto) {
             </div>
           </div>
         </div>
-        <button id="map-save-area-button" type="button">Save Area</button>
       </div>
     `;
   const infoOpen = state.mapDetailInfoOpen;
@@ -3669,14 +3676,10 @@ function handleMapDetailClick(event) {
     state.mapAreaDraftId = raw ? Number(raw) : null;
     state.mapAreaMenuOpen = false;
     setHoverSuppressed(false);
-    renderMap();
+    // Picking an area applies immediately and closes the list (no Save button).
+    updateSelectedPhotoArea(state.mapAreaDraftId).catch((error) => setStatus(error.message, true));
     return;
   }
-  const button = event.target.closest("#map-save-area-button");
-  if (!button) return;
-  state.mapAreaMenuOpen = false;
-  setHoverSuppressed(false);
-  updateSelectedPhotoArea(state.mapAreaDraftId).catch((error) => setStatus(error.message, true));
 }
 
 function handleMapDetailInput(event) {
