@@ -1360,6 +1360,126 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return row_to_photo(row)
 
     @app.post(
+        "/api/projects/{project_id}/photos/{photo_id}/rollback",
+        response_model=PhotoResponse,
+    )
+    def rollback_photo(project_id: int, photo_id: int) -> dict[str, Any]:
+        """Undo a single photo's rename, restoring its pre-rename filename.
+
+        Unlike the run-level rollback, this reverts one pano (issue #27) so a
+        mistaken rename can be fixed from the map without touching the rest of
+        the batch. It finds the most recent rename run that renamed this photo,
+        reverses just that file, flips the photo back to pending, and records
+        the partial rollback on that run.
+        """
+        with db.connect() as conn:
+            fetch_project(conn, project_id)
+            photo = conn.execute(
+                "SELECT * FROM photos WHERE project_id = ? AND id = ?",
+                (project_id, photo_id),
+            ).fetchone()
+            if photo is None:
+                raise HTTPException(status_code=404, detail="Photo not found")
+            if not photo["applied"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This pano has not been renamed, so there is nothing to roll back.",
+                )
+
+            # Find the newest run that renamed this photo; its results_json holds
+            # the original (source) path we need to restore the file to.
+            run_rows = conn.execute(
+                """
+                SELECT * FROM rename_runs
+                WHERE project_id = ?
+                ORDER BY COALESCE(completed_at, started_at) DESC, id DESC
+                """,
+                (project_id,),
+            ).fetchall()
+            target_run = None
+            target_result = None
+            for run_row in run_rows:
+                for result in loads_json(run_row["results_json"], []):
+                    if (
+                        result.get("photo_id") == photo_id
+                        and result.get("status") == "renamed"
+                    ):
+                        target_run = run_row
+                        target_result = result
+                        break
+                if target_run is not None:
+                    break
+            if target_run is None or target_result is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No rename history found for this pano; it cannot be rolled back automatically.",
+                )
+
+            rollback_result = rollback_rename_results([target_result])[0]
+            status = rollback_result.get("status")
+            if status in {"rolled_back", "restored_pending"}:
+                conn.execute(
+                    """
+                    UPDATE photos
+                    SET original_path = ?, applied = 0, error = NULL, updated_at = ?
+                    WHERE id = ? AND project_id = ?
+                    """,
+                    (rollback_result["source_path"], utc_now(), photo_id, project_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE filename_reservations
+                    SET reservation_status = 'rolled_back', updated_at = ?
+                    WHERE project_id = ? AND rename_run_id = ? AND photo_id = ?
+                    """,
+                    (utc_now(), project_id, target_run["id"], photo_id),
+                )
+            else:
+                detail = rollback_result.get("detail")
+                message = detail or (status or "unknown error").replace("_", " ")
+                raise HTTPException(
+                    status_code=409, detail=f"Rollback failed: {message}."
+                )
+
+            # Record the partial rollback on the run without marking the whole
+            # run rolled back (other panos in it stay applied).
+            existing_rollback = loads_json(target_run["rollback_results_json"], [])
+            existing_rollback = [
+                entry
+                for entry in existing_rollback
+                if entry.get("photo_id") != photo_id
+            ]
+            existing_rollback.append(rollback_result)
+            conn.execute(
+                "UPDATE rename_runs SET rollback_results_json = ? WHERE id = ? AND project_id = ?",
+                (dumps_json(existing_rollback), target_run["id"], project_id),
+            )
+
+            log_audit(
+                conn,
+                "photo_rollback",
+                "photo",
+                photo_id,
+                {
+                    "rename_run_id": target_run["id"],
+                    "source_path": rollback_result.get("source_path"),
+                    "target_path": rollback_result.get("target_path"),
+                },
+            )
+            refresh_pending_photo_matches(conn, project_id)
+            conn.commit()
+            row = conn.execute(
+                """
+                SELECT photos.*, areas.name AS area_name
+                FROM photos
+                LEFT JOIN areas ON photos.matched_area_id = areas.id
+                WHERE photos.project_id = ? AND photos.id = ?
+                """,
+                (project_id, photo_id),
+            ).fetchone()
+        return row_to_photo(row)
+
+    @app.post(
         "/api/projects/{project_id}/rename-reservations/commit",
         response_model=RenameReservationsCommitResponse,
     )

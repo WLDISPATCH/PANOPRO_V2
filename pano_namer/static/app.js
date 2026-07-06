@@ -2030,7 +2030,11 @@ function renderMapSelectedDetail(selectedPhoto) {
     `),
   ].join("");
   const areaEditor = selectedPhoto.applied
-    ? `<div class="map-guidance-card"><strong>Area locked</strong><span>Processed photos cannot be reassigned. Remove and re-import if the name needs to change.</span></div>`
+    ? `<div class="map-guidance-card">
+         <strong>Renamed</strong>
+         <span>This pano has been renamed. Roll back to undo the rename, restore the original filename, and return it to pending so it can be re-assigned.</span>
+         <button data-map-action="rollback-photo" class="secondary" type="button">Roll Back Rename</button>
+       </div>`
     : `
       <div class="detail-form map-area-editor">
         <div>
@@ -3445,6 +3449,20 @@ async function removePhoto(photoId) {
   setStatus(`Removed ${removed.removed || 0} photo record${removed.removed === 1 ? "" : "s"} from the app.`);
 }
 
+async function rollbackPhoto(photoId) {
+  if (!state.currentProjectId || !photoId) return;
+  const confirmed = window.confirm(
+    "Roll back this pano's rename? The file will be renamed back to its original filename and the pano returned to pending.",
+  );
+  if (!confirmed) return;
+  const photo = await api(
+    `/api/projects/${state.currentProjectId}/photos/${photoId}/rollback`,
+    { method: "POST" },
+  );
+  await refreshProjectData();
+  setStatus(`Rolled back rename for ${baseName(photo.original_path)}.`);
+}
+
 function extractDroppedPaths(event) {
   const files = [...event.dataTransfer.files];
   const paths = files.map((file) => file.path || "").filter(Boolean);
@@ -3637,6 +3655,10 @@ function handleMapDetailClick(event) {
     }
     if (action === "remove-photo" && !selectedPhoto.applied) {
       removePhoto(selectedPhoto.id).catch((error) => setStatus(error.message, true));
+      return;
+    }
+    if (action === "rollback-photo" && selectedPhoto.applied) {
+      rollbackPhoto(selectedPhoto.id).catch((error) => setStatus(error.message, true));
       return;
     }
     if (action === "toggle-info") {
