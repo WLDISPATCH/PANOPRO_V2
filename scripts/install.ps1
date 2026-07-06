@@ -15,11 +15,15 @@ function Write-Step($message) {
     Write-Host "==> $message" -ForegroundColor Cyan
 }
 
+# The app imports datetime.UTC, so 3.11 is the real minimum. Any already
+# installed Python at or above this is used as-is; nothing is upgraded.
+$MinPython = "(3, 11)"
+
 function Test-PythonVersion($exe) {
-    # Returns $true when $exe is a working Python >= 3.13.
+    # Returns $true when $exe is a working Python >= the minimum.
     if (-not $exe) { return $false }
     try {
-        $ok = & $exe -c "import sys; print(1 if sys.version_info[:2] >= (3, 13) else 0)" 2>$null
+        $ok = & $exe -c "import sys; print(1 if sys.version_info[:2] >= $MinPython else 0)" 2>$null
     } catch {
         return $false
     }
@@ -27,19 +31,20 @@ function Test-PythonVersion($exe) {
 }
 
 function Resolve-Python {
-    # Probe the common ways Python shows up on a Windows box, newest-friendly
-    # first, and return the first interpreter that is >= 3.13.
+    # Use whatever suitable Python is already on the machine; do not force a
+    # particular version or upgrade. Probe the newest installed 3.x, then
+    # python/python3 on PATH, then the default per-user install location.
     $candidates = @()
 
-    foreach ($args in @(@("-3.13"), @("-3"))) {
-        try {
-            $path = & py $args -c "import sys; print(sys.executable)" 2>$null
-            if ($path) { $candidates += $path.Trim() }
-        } catch {}
-    }
+    try {
+        $path = & py -3 -c "import sys; print(sys.executable)" 2>$null
+        if ($path) { $candidates += $path.Trim() }
+    } catch {}
 
-    $onPath = Get-Command python -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue
-    if ($onPath) { $candidates += $onPath }
+    foreach ($name in @("python", "python3")) {
+        $onPath = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue
+        if ($onPath) { $candidates += $onPath }
+    }
 
     $candidates += (Join-Path $env:LOCALAPPDATA "Programs\Python\Python313\python.exe")
 
@@ -52,9 +57,9 @@ function Resolve-Python {
 }
 
 function Install-Python {
-    Write-Step "Python 3.13 was not found. Installing it with winget..."
+    Write-Step "No suitable Python (3.11+) found. Installing Python 3.13 with winget..."
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        throw "winget is not available on this machine. Install Python 3.13 from https://www.python.org/downloads/ (check 'Add python.exe to PATH'), then run install.bat again."
+        throw "winget is not available on this machine. Install Python 3.11 or newer from https://www.python.org/downloads/ (check 'Add python.exe to PATH'), then run install.bat again."
     }
     winget install --id Python.Python.3.13 -e --accept-package-agreements --accept-source-agreements --disable-interactivity
     # winget does not refresh this session's PATH, so resolve at the known
@@ -105,7 +110,7 @@ Write-Host "PANO PRO installer" -ForegroundColor Green
 Write-Host "Repo: $repoRoot"
 
 # 1. Python
-Write-Step "Looking for Python 3.13..."
+Write-Step "Looking for an existing Python (3.11+)..."
 $python = Resolve-Python
 if (-not $python) {
     $python = Install-Python
