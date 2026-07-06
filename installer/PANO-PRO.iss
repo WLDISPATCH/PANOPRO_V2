@@ -1,6 +1,6 @@
 #define MyAppName "PANO PRO"
 #ifndef AppVersion
-  #define AppVersion "2.4.1-dev"
+  #define AppVersion "2.7.1"
 #endif
 #define MyAppPublisher "Inline Group Inc."
 #define MyAppURL "https://inlinegroupinc.ca"

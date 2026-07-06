@@ -17,6 +17,20 @@ Windows-first, web-ready app for importing DJI 360 photos, matching them to DXF-
 - Batch rename planning using `YYMMDD_AREA_sequence`
 - FastAPI service layer and PySide6 desktop host
 
+## Quick Install (New Machine)
+
+For setting up a fresh computer, use the one-click installer instead of the
+manual steps below:
+
+1. Download and unzip this repository.
+2. Double-click **`install.bat`** in the unzipped folder.
+
+The installer auto-installs Python 3.13 (via winget) if it isn't already
+present, sets up a local environment with all dependencies, and creates a
+**PANO PRO** shortcut on the desktop and Start Menu. Launch the app from that
+shortcut. Keep the unzipped folder in place — it is the installed app. Re-run
+`install.bat` any time to repair or update dependencies.
+
 ## Run From Source
 
 1. Install Python 3.13.

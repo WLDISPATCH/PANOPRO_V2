@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.venv/
 .pano_namer_data/
 .test_tmp/
 build/
@@ -7,3 +8,4 @@ dist/
 node_modules/
 .env
 _release/
+installer/pano_pro.ico
