@@ -115,6 +115,7 @@ const elements = {
   reviewDescription: document.getElementById("review-description"),
   smartImportBase: document.getElementById("smart-import-base"),
   smartArchiveBase: document.getElementById("smart-archive-base"),
+  smartIgnoreFolders: document.getElementById("smart-ignore-folders"),
   smartFtpHost: document.getElementById("smart-ftp-host"),
   smartFtpPort: document.getElementById("smart-ftp-port"),
   smartFtpUsername: document.getElementById("smart-ftp-username"),
@@ -2030,7 +2031,11 @@ function renderMapSelectedDetail(selectedPhoto) {
     `),
   ].join("");
   const areaEditor = selectedPhoto.applied
-    ? `<div class="map-guidance-card"><strong>Area locked</strong><span>Processed photos cannot be reassigned. Remove and re-import if the name needs to change.</span></div>`
+    ? `<div class="map-guidance-card">
+         <strong>Renamed</strong>
+         <span>This pano has been renamed. Roll back to undo the rename, restore the original filename, and return it to pending so it can be re-assigned.</span>
+         <button data-map-action="rollback-photo" class="secondary" type="button">Roll Back Rename</button>
+       </div>`
     : `
       <div class="detail-form map-area-editor">
         <div>
@@ -2925,6 +2930,7 @@ async function loadSmartSettings() {
   state.smartSettings = settings;
   elements.smartImportBase.value = settings.import_base_path || "";
   elements.smartArchiveBase.value = settings.archive_base_path || "";
+  elements.smartIgnoreFolders.value = (settings.ignore_folders || []).join("\n");
   elements.smartFtpHost.value = settings.ftp_host || "";
   elements.smartFtpPort.value = settings.ftp_port > 0 ? settings.ftp_port : "";
   elements.smartFtpUsername.value = settings.ftp_username || "";
@@ -2934,6 +2940,25 @@ async function loadSmartSettings() {
   elements.smartFtpEnabled.checked = Boolean(settings.ftp_enabled);
   elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
   applyUiMode(settings.ui_mode);
+  // Best-effort pull of the shared ignore list; only reflects if it changed.
+  syncIgnoreFolders();
+}
+
+// Two-way sync of the shared ignore-folders list. Silent if Supabase is not
+// configured; updates the textarea when the network copy wins.
+async function syncIgnoreFolders() {
+  try {
+    const result = await api("/api/smart/ignore-folders/sync", { method: "POST" });
+    if (result && result.ok && Array.isArray(result.ignore_folders)) {
+      const joined = result.ignore_folders.join("\n");
+      if (elements.smartIgnoreFolders.value.trim() !== joined.trim()) {
+        elements.smartIgnoreFolders.value = joined;
+      }
+      if (state.smartSettings) state.smartSettings.ignore_folders = result.ignore_folders;
+    }
+  } catch (error) {
+    // Sync is best-effort; ignore offline/unconfigured errors.
+  }
 }
 
 async function saveSmartSettings() {
@@ -2942,6 +2967,10 @@ async function saveSmartSettings() {
     body: JSON.stringify({
       import_base_path: elements.smartImportBase.value.trim(),
       archive_base_path: elements.smartArchiveBase.value.trim(),
+      ignore_folders: elements.smartIgnoreFolders.value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
       ftp_host: elements.smartFtpHost.value.trim(),
       ftp_port: Number(elements.smartFtpPort.value) || 0,
       ftp_username: elements.smartFtpUsername.value.trim(),
@@ -2954,6 +2983,8 @@ async function saveSmartSettings() {
   state.smartSettings = settings;
   elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
   setStatus("Smart Mode settings saved.");
+  // Push the (possibly updated) ignore list to the shared registry.
+  syncIgnoreFolders();
 }
 
 async function toggleUiMode() {
@@ -3445,6 +3476,20 @@ async function removePhoto(photoId) {
   setStatus(`Removed ${removed.removed || 0} photo record${removed.removed === 1 ? "" : "s"} from the app.`);
 }
 
+async function rollbackPhoto(photoId) {
+  if (!state.currentProjectId || !photoId) return;
+  const confirmed = window.confirm(
+    "Roll back this pano's rename? The file will be renamed back to its original filename and the pano returned to pending.",
+  );
+  if (!confirmed) return;
+  const photo = await api(
+    `/api/projects/${state.currentProjectId}/photos/${photoId}/rollback`,
+    { method: "POST" },
+  );
+  await refreshProjectData();
+  setStatus(`Rolled back rename for ${baseName(photo.original_path)}.`);
+}
+
 function extractDroppedPaths(event) {
   const files = [...event.dataTransfer.files];
   const paths = files.map((file) => file.path || "").filter(Boolean);
@@ -3637,6 +3682,10 @@ function handleMapDetailClick(event) {
     }
     if (action === "remove-photo" && !selectedPhoto.applied) {
       removePhoto(selectedPhoto.id).catch((error) => setStatus(error.message, true));
+      return;
+    }
+    if (action === "rollback-photo" && selectedPhoto.applied) {
+      rollbackPhoto(selectedPhoto.id).catch((error) => setStatus(error.message, true));
       return;
     }
     if (action === "toggle-info") {

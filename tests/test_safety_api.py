@@ -57,6 +57,9 @@ class SafetyApiTests(unittest.TestCase):
         self.rollback_rename = self._route(
             "/api/projects/{project_id}/rename-runs/{run_id}/rollback", "POST"
         )
+        self.rollback_photo = self._route(
+            "/api/projects/{project_id}/photos/{photo_id}/rollback", "POST"
+        )
         self.project = self.create_project(ProjectCreate(name="Template A"))
 
     def tearDown(self) -> None:
@@ -411,6 +414,76 @@ class SafetyApiTests(unittest.TestCase):
 
         self.assertEqual(statuses, ["rolled_back"])
         self.assertEqual(counter["next_sequence_number"], 2)
+
+    def test_rollback_single_photo_leaves_other_panos_applied(self) -> None:
+        area = self.create_area(self.project["id"], AreaCreate(name="Drain"))
+        first_source = self.create_photo("first.jpg", payload=b"one")
+        second_source = self.create_photo("second.jpg", payload=b"two")
+        import_payload = self.import_with_metadata([first_source, second_source])
+        photos = import_payload["imported"]
+        for photo in photos:
+            self.update_photo(
+                self.project["id"],
+                photo["id"],
+                PhotoUpdateRequest(matched_area_id=area["id"]),
+            )
+
+        run = self.run_rename(self.project["id"], RenameRunCreate())
+        results_by_photo = {r["photo_id"]: r for r in run["results"]}
+        first_id, second_id = photos[0]["id"], photos[1]["id"]
+        first_target = Path(results_by_photo[first_id]["target_path"])
+        second_target = Path(results_by_photo[second_id]["target_path"])
+        self.assertTrue(first_target.exists())
+        self.assertTrue(second_target.exists())
+
+        rolled = self.rollback_photo(self.project["id"], first_id)
+
+        # The rolled-back pano is pending again with its original file restored.
+        self.assertFalse(rolled["applied"])
+        self.assertEqual(rolled["original_path"], str(first_source))
+        self.assertTrue(first_source.exists())
+        self.assertFalse(first_target.exists())
+
+        # The other pano is untouched: still applied, still renamed on disk.
+        photos_by_id = {p["id"]: p for p in self.list_photos(self.project["id"])}
+        self.assertTrue(photos_by_id[second_id]["applied"])
+        self.assertTrue(second_target.exists())
+
+        # The run records the partial rollback but is NOT marked fully rolled back.
+        with self.app.state.db.connect() as conn:
+            run_row = conn.execute(
+                "SELECT rollback_completed_at, rollback_results_json FROM rename_runs WHERE id = ?",
+                (run["id"],),
+            ).fetchone()
+            statuses = [
+                row["reservation_status"]
+                for row in conn.execute(
+                    """
+                    SELECT reservation_status FROM filename_reservations
+                    WHERE project_id = ? AND rename_run_id = ? AND photo_id = ?
+                    """,
+                    (self.project["id"], run["id"], first_id),
+                ).fetchall()
+            ]
+        self.assertIsNone(run_row["rollback_completed_at"])
+        self.assertEqual(statuses, ["rolled_back"])
+
+    def test_rollback_photo_rejects_pending_pano(self) -> None:
+        from fastapi import HTTPException
+
+        area = self.create_area(self.project["id"], AreaCreate(name="Drain"))
+        source = self.create_photo("pending.jpg")
+        import_payload = self.import_with_metadata([source])
+        photo = import_payload["imported"][0]
+        self.update_photo(
+            self.project["id"],
+            photo["id"],
+            PhotoUpdateRequest(matched_area_id=area["id"]),
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            self.rollback_photo(self.project["id"], photo["id"])
+        self.assertEqual(ctx.exception.status_code, 400)
 
     def test_desktop_reservation_commit_william_jeff_sequences_do_not_overlap(
         self,

@@ -108,20 +108,38 @@ def is_stitched_pano(path: Path) -> bool:
     return height > 0 and width == height * 2 and width >= _MIN_FALLBACK_PANO_WIDTH
 
 
-def scan_events(source_root: Path):
+def _is_under_ignored_folder(path: Path, scan_root: Path, ignored: set[str]) -> bool:
+    """True when any folder in path (below scan_root) has an ignored name."""
+    if not ignored:
+        return False
+    try:
+        relative = path.relative_to(scan_root)
+    except ValueError:
+        relative = path
+    # relative.parts includes the filename last; only the parent folders matter.
+    return any(part.casefold() in ignored for part in relative.parts[:-1])
+
+
+def scan_events(source_root: Path, ignore_folders: list[str] | None = None):
     """Walk a DCIM tree yielding progress dicts, then a final result dict.
 
     Non-pano JPGs are only counted so the summary can show the card was
     fully read; nothing besides stitched panos is ever imported. Progress
     events ({"type": "progress", scanned, total, panos}) are throttled to
     every few files; the last event is {"type": "result", "result": ScanResult}.
+
+    Files inside any folder named in ``ignore_folders`` (case-insensitive, at
+    any depth) are skipped entirely so raw/working folders can be excluded.
     """
     result = ScanResult(source_root=source_root)
     scan_root = source_root / "DCIM" if (source_root / "DCIM").is_dir() else source_root
+    ignored = {name.casefold() for name in (ignore_folders or [])}
     candidates = [
         path
         for path in sorted(scan_root.rglob("*"))
-        if path.is_file() and path.suffix.lower() in PANO_EXTENSIONS
+        if path.is_file()
+        and path.suffix.lower() in PANO_EXTENSIONS
+        and not _is_under_ignored_folder(path, scan_root, ignored)
     ]
     total = len(candidates)
     for index, path in enumerate(candidates, start=1):
@@ -151,10 +169,12 @@ def scan_events(source_root: Path):
     yield {"type": "result", "result": result}
 
 
-def scan_for_panos(source_root: Path) -> ScanResult:
+def scan_for_panos(
+    source_root: Path, ignore_folders: list[str] | None = None
+) -> ScanResult:
     """Non-streaming wrapper over scan_events."""
     result = ScanResult(source_root=source_root)
-    for event in scan_events(source_root):
+    for event in scan_events(source_root, ignore_folders):
         if event["type"] == "result":
             result = event["result"]
     return result
