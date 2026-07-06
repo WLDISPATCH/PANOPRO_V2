@@ -109,6 +109,34 @@ def _append_recent_windows_faults(handle) -> None:
     threading.Thread(target=worker, name="fault-log-scan", daemon=True).start()
 
 
+def configure_webengine() -> str:
+    """Harden QtWebEngine's Chromium bring-up against startup crashes.
+
+    Field machines (issues #21, #26) die at launch with an access violation
+    inside Qt6WebEngineCore.dll, attributed to the main pythonw.exe process —
+    the signature of Chromium's in-process GPU / sandbox initialization
+    faulting against a driver, not our code. We relax the GPU sandbox (a
+    frequent AV source) while keeping hardware acceleration for the WebGL 360
+    viewer, and expose two escape hatches for machines that still crash:
+
+      PANOPRO_CHROMIUM_FLAGS  replace the default Chromium flag string entirely
+      PANOPRO_DISABLE_GPU=1   fall back to software rendering (WebGL still works
+                              via SwiftShader, just slower) for the worst cases
+
+    Chromium reads QTWEBENGINE_CHROMIUM_FLAGS during QtWebEngine init, so this
+    must run before QApplication is constructed. Returns the applied flags.
+    """
+    default_flags = "--disable-gpu-sandbox --no-sandbox"
+    flags = os.environ.get("PANOPRO_CHROMIUM_FLAGS", default_flags)
+    if os.environ.get("PANOPRO_DISABLE_GPU") == "1":
+        # Keep the software rasterizer so WebGL falls back to SwiftShader.
+        flags = f"{flags} --disable-gpu --disable-gpu-compositing"
+    existing = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    applied = f"{existing} {flags}".strip()
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = applied
+    return applied
+
+
 def ensure_std_streams() -> None:
     """Guarantee sys.stdout/sys.stderr are real writable streams.
 
@@ -194,7 +222,16 @@ def main() -> int:
     if log_path is not None:
         print(f"Crash log: {log_path}")
 
-    from PySide6.QtCore import QObject, QUrl, Signal, Slot
+    # Set Chromium flags before any QtWebEngine import so they take effect.
+    applied_flags = configure_webengine()
+    if log_path is not None:
+        try:
+            with log_path.open("a", encoding="utf-8", errors="replace") as fh:
+                fh.write(f"QtWebEngine flags: {applied_flags}\n")
+        except OSError:
+            pass
+
+    from PySide6.QtCore import QObject, Qt, QUrl, Signal, Slot
     from PySide6.QtWebChannel import QWebChannel
     from PySide6.QtGui import QDesktopServices
     from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -290,6 +327,11 @@ def main() -> int:
     server_thread = threading.Thread(target=start_server, args=(port,), daemon=True)
     server_thread.start()
     wait_for_server(port)
+
+    # Qt recommends sharing GL contexts when QtWebEngine is used; without it
+    # WebEngine can hit context conflicts on some drivers. Must be set before
+    # the QApplication is created.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
     app = QApplication(sys.argv)
     view = QWebEngineView()
