@@ -32,6 +32,14 @@ shortcut on the desktop and Start Menu. Launch the app from that
 shortcut. Keep the unzipped folder in place — it is the installed app. Re-run
 `install.bat` any time to repair or update dependencies.
 
+### Updating
+
+To update an installed copy to the latest version, close the app and
+double-click **`update.bat`**. It downloads the latest code from GitHub and
+refreshes dependencies **without touching your data** (`.pano_namer_data`) or
+environment (`.venv`); it skips the download if you are already up to date.
+Relaunch from the same desktop shortcut afterward.
+
 ## Run From Source
 
 1. Install Python 3.13.
