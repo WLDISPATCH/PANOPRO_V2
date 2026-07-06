@@ -4,11 +4,11 @@
 # existing .venv, WITHOUT touching your data (.pano_namer_data) or environment.
 # Close the app before running. Re-runnable and safe.
 #
-# Pass -Force to reinstall even when already on the latest version.
-
-param(
-    [switch]$Force
-)
+# Works two ways:
+#   - as a local file: scripts\update.ps1 updates the repo it lives in
+#   - fetched remotely: a copied-in update.bat sets $env:PANOPRO_UPDATE_DIR to
+#     the folder to update and runs `irm .../update.ps1 | iex`
+# Set $env:PANOPRO_UPDATE_FORCE = "1" to reinstall even when already current.
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -25,8 +25,22 @@ $Protected = @(
     "build", "dist", "_release", ".test_tmp", "__pycache__", "node_modules"
 )
 
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Split-Path -Parent $scriptRoot
+$Force = ($env:PANOPRO_UPDATE_FORCE -eq "1")
+
+# Which folder to update: an explicit env var (set by a copied-in update.bat)
+# wins; otherwise the repo this script file lives in; otherwise the current dir.
+if ($env:PANOPRO_UPDATE_DIR) {
+    $repoRoot = $env:PANOPRO_UPDATE_DIR.TrimEnd("\")
+} elseif ($MyInvocation.MyCommand.Path) {
+    $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+} else {
+    $repoRoot = (Get-Location).Path
+}
+
+# Guard: this is an updater for an existing install, not a fresh installer.
+if (-not (Test-Path (Join-Path $repoRoot "pano_namer"))) {
+    throw "This does not look like a PANO PRO folder ($repoRoot). Copy update.bat into an existing PANO PRO folder, or use install.bat / bootstrap.bat for a fresh setup."
+}
 
 function Write-Step($message) {
     Write-Host ""
