@@ -110,27 +110,34 @@ def _append_recent_windows_faults(handle) -> None:
 
 
 def configure_webengine() -> str:
-    """Harden QtWebEngine's Chromium bring-up against startup crashes.
+    """Harden QtWebEngine's Chromium bring-up against GPU crashes.
 
-    Field machines (issues #21, #26) die at launch with an access violation
-    inside Qt6WebEngineCore.dll, attributed to the main pythonw.exe process —
-    the signature of Chromium's in-process GPU / sandbox initialization
-    faulting against a driver, not our code. We relax the GPU sandbox (a
-    frequent AV source) while keeping hardware acceleration for the WebGL 360
-    viewer, and expose two escape hatches for machines that still crash:
+    Field machines (issues #21, #26) die with an access violation inside
+    Qt6WebEngineCore.dll — Chromium's GPU path faulting against the display
+    driver, not our code. It happens both at launch and mid-session (e.g. on
+    the map), and relaxing only the sandbox was not enough. So by default we
+    route Chromium's ANGLE layer through the SwiftShader software backend
+    (--use-angle=swiftshader): every bit of GPU work, including WebGL, is done
+    in software and the real driver is never touched, which removes the fault.
+    Crucially this keeps WebGL working for the 360 viewer (just slower) —
+    unlike --disable-gpu, which disables WebGL entirely in Qt 6.9.
 
+    Escape hatches:
+      PANOPRO_FORCE_GPU=1     use the real GPU (faster 360 viewer) on machines
+                              that are known stable
       PANOPRO_CHROMIUM_FLAGS  replace the default Chromium flag string entirely
-      PANOPRO_DISABLE_GPU=1   fall back to software rendering (WebGL still works
-                              via SwiftShader, just slower) for the worst cases
 
     Chromium reads QTWEBENGINE_CHROMIUM_FLAGS during QtWebEngine init, so this
     must run before QApplication is constructed. Returns the applied flags.
     """
-    default_flags = "--disable-gpu-sandbox --no-sandbox"
+    if os.environ.get("PANOPRO_FORCE_GPU") == "1":
+        # Opt back into hardware acceleration; keep the sandbox relaxed.
+        default_flags = "--disable-gpu-sandbox --no-sandbox"
+    else:
+        # Software rendering via SwiftShader ANGLE: no real GPU driver, but
+        # WebGL still works so the 360 viewer keeps rendering.
+        default_flags = "--disable-gpu-sandbox --no-sandbox --use-angle=swiftshader"
     flags = os.environ.get("PANOPRO_CHROMIUM_FLAGS", default_flags)
-    if os.environ.get("PANOPRO_DISABLE_GPU") == "1":
-        # Keep the software rasterizer so WebGL falls back to SwiftShader.
-        flags = f"{flags} --disable-gpu --disable-gpu-compositing"
     existing = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     applied = f"{existing} {flags}".strip()
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = applied

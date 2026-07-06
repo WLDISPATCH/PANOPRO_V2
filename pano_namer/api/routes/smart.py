@@ -30,7 +30,14 @@ from pano_namer.schemas import (
     SmartSettingsPayload,
     SmartSettingsResponse,
 )
-from pano_namer.services import ftp_export, pano_registry, sd_card, shared_naming, smart_mode
+from pano_namer.services import (
+    ftp_export,
+    ignore_folders_sync,
+    pano_registry,
+    sd_card,
+    shared_naming,
+    smart_mode,
+)
 from pano_namer.services.common import utc_now
 from pano_namer.services.shared_naming import SharedNamingError
 
@@ -66,6 +73,7 @@ def register_smart_routes(
             "ftp_remote_path": settings.ftp_remote_path,
             "ftp_protocol": settings.ftp_protocol,
             "ftp_enabled": settings.ftp_enabled,
+            "ignore_folders": settings.ignore_folders,
         }
 
     @app.get("/api/smart/settings", response_model=SmartSettingsResponse)
@@ -78,6 +86,7 @@ def register_smart_routes(
     def put_smart_settings(payload: SmartSettingsPayload) -> dict[str, Any]:
         with db.connect() as conn:
             settings = smart_mode.load_settings(conn)
+            old_ignore = list(settings.ignore_folders)
             for field_name in (
                 "ui_mode",
                 "import_base_path",
@@ -89,6 +98,7 @@ def register_smart_routes(
                 "ftp_remote_path",
                 "ftp_protocol",
                 "ftp_enabled",
+                "ignore_folders",
             ):
                 value = getattr(payload, field_name)
                 if value is not None:
@@ -105,10 +115,23 @@ def register_smart_routes(
                     status_code=400,
                     detail="ftp_protocol must be 'ftp', 'ftps', or 'sftp'.",
                 )
+            # Stamp the ignore list when it changes so supabase last-writer-wins
+            # sync can order edits across machines.
+            normalized_ignore = smart_mode.parse_ignore_folders(
+                "\n".join(settings.ignore_folders)
+            )
+            settings.ignore_folders = normalized_ignore
+            if normalized_ignore != old_ignore:
+                settings.ignore_folders_updated_at = utc_now()
             smart_mode.save_settings(conn, settings)
             conn.commit()
             settings = smart_mode.load_settings(conn)
         return settings_response(settings)
+
+    @app.post("/api/smart/ignore-folders/sync")
+    def sync_ignore_folders() -> dict[str, Any]:
+        """Two-way sync the global ignore list with Supabase (best-effort)."""
+        return ignore_folders_sync.run_ignore_folders_sync(db)
 
     @app.get("/api/smart/drives", response_model=SmartDrivesResponse)
     def list_smart_drives() -> dict[str, Any]:
@@ -126,13 +149,16 @@ def register_smart_routes(
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "error": None}
 
-    def _prepare_smart_import(payload: SmartImportRequest) -> tuple[Path, Path, Any]:
+    def _prepare_smart_import(
+        payload: SmartImportRequest,
+    ) -> tuple[Path, Path, Any, list[str]]:
         """Validate settings/source before any streaming begins (guards must
         surface as proper HTTP errors, which is impossible mid-stream)."""
         with db.connect() as conn:
             fetch_project(conn, payload.project_id)
             settings = smart_mode.load_settings(conn)
             naming_settings = shared_naming.load_settings(conn)
+        ignore_folders = settings.ignore_folders
 
         if not settings.import_base_path:
             raise HTTPException(
@@ -163,17 +189,21 @@ def register_smart_routes(
                     + ". Choose one manually.",
                 )
             source_root = drives[0]
-        return base_path, source_root, naming_settings
+        return base_path, source_root, naming_settings, ignore_folders
 
     def _smart_import_events(
-        project_id: int, base_path: Path, source_root: Path, naming_settings
+        project_id: int,
+        base_path: Path,
+        source_root: Path,
+        naming_settings,
+        ignore_folders: list[str] | None = None,
     ):
         """Run the import, yielding live progress events; last event is
         {"stage": "done", "result": summary} or {"stage": "error", ...}."""
         yield {"stage": "detect", "source_path": str(source_root)}
 
         scan = None
-        for event in sd_card.scan_events(source_root):
+        for event in sd_card.scan_events(source_root, ignore_folders):
             if event["type"] == "result":
                 scan = event["result"]
             else:
@@ -271,10 +301,12 @@ def register_smart_routes(
 
     @app.post("/api/smart/import", response_model=SmartImportResponse)
     def smart_import(payload: SmartImportRequest) -> dict[str, Any]:
-        base_path, source_root, naming_settings = _prepare_smart_import(payload)
+        base_path, source_root, naming_settings, ignore_folders = _prepare_smart_import(
+            payload
+        )
         final: dict[str, Any] | None = None
         for event in _smart_import_events(
-            payload.project_id, base_path, source_root, naming_settings
+            payload.project_id, base_path, source_root, naming_settings, ignore_folders
         ):
             if event["stage"] == "error":
                 raise HTTPException(status_code=503, detail=event["detail"])
@@ -284,12 +316,18 @@ def register_smart_routes(
 
     @app.post("/api/smart/import/stream")
     def smart_import_stream(payload: SmartImportRequest) -> StreamingResponse:
-        base_path, source_root, naming_settings = _prepare_smart_import(payload)
+        base_path, source_root, naming_settings, ignore_folders = _prepare_smart_import(
+            payload
+        )
 
         def ndjson():
             try:
                 for event in _smart_import_events(
-                    payload.project_id, base_path, source_root, naming_settings
+                    payload.project_id,
+                    base_path,
+                    source_root,
+                    naming_settings,
+                    ignore_folders,
                 ):
                     yield json.dumps(event) + "\n"
             except Exception as exc:  # surfaced as an event; headers already sent

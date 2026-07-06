@@ -386,6 +386,7 @@ class SmartSettingsPayload(BaseModel):
     ftp_remote_path: str | None = None
     ftp_protocol: str | None = None
     ftp_enabled: bool | None = None
+    ignore_folders: list[str] | None = None
 
 
 class SmartSettingsResponse(BaseModel):
@@ -399,6 +400,7 @@ class SmartSettingsResponse(BaseModel):
     ftp_remote_path: str
     ftp_protocol: str
     ftp_enabled: bool
+    ignore_folders: list[str] = Field(default_factory=list)
 
 
 class SmartDrivesResponse(BaseModel):
