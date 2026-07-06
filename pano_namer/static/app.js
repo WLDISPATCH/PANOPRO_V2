@@ -2940,6 +2940,25 @@ async function loadSmartSettings() {
   elements.smartFtpEnabled.checked = Boolean(settings.ftp_enabled);
   elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
   applyUiMode(settings.ui_mode);
+  // Best-effort pull of the shared ignore list; only reflects if it changed.
+  syncIgnoreFolders();
+}
+
+// Two-way sync of the shared ignore-folders list. Silent if Supabase is not
+// configured; updates the textarea when the network copy wins.
+async function syncIgnoreFolders() {
+  try {
+    const result = await api("/api/smart/ignore-folders/sync", { method: "POST" });
+    if (result && result.ok && Array.isArray(result.ignore_folders)) {
+      const joined = result.ignore_folders.join("\n");
+      if (elements.smartIgnoreFolders.value.trim() !== joined.trim()) {
+        elements.smartIgnoreFolders.value = joined;
+      }
+      if (state.smartSettings) state.smartSettings.ignore_folders = result.ignore_folders;
+    }
+  } catch (error) {
+    // Sync is best-effort; ignore offline/unconfigured errors.
+  }
 }
 
 async function saveSmartSettings() {
@@ -2964,6 +2983,8 @@ async function saveSmartSettings() {
   state.smartSettings = settings;
   elements.smartSettingsStatus.textContent = smartSettingsStatusText(settings);
   setStatus("Smart Mode settings saved.");
+  // Push the (possibly updated) ignore list to the shared registry.
+  syncIgnoreFolders();
 }
 
 async function toggleUiMode() {

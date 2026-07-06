@@ -18,6 +18,7 @@ _SETTING_FTP_REMOTE_PATH = "smart_mode.ftp_remote_path"
 _SETTING_FTP_PROTOCOL = "smart_mode.ftp_protocol"
 _SETTING_FTP_ENABLED = "smart_mode.ftp_enabled"
 _SETTING_IGNORE_FOLDERS = "smart_mode.ignore_folders"
+_SETTING_IGNORE_FOLDERS_UPDATED_AT = "smart_mode.ignore_folders_updated_at"
 
 
 def parse_ignore_folders(raw: str) -> list[str]:
@@ -63,6 +64,9 @@ class SmartModeSettings:
     ftp_protocol: str = PROTOCOL_FTP
     ftp_enabled: bool = False
     ignore_folders: list[str] = field(default_factory=list)
+    # ISO timestamp of the last ignore_folders change, for supabase
+    # last-writer-wins sync. Empty until the list is first edited.
+    ignore_folders_updated_at: str = ""
 
     def ftp_configured(self) -> bool:
         return bool(self.ftp_host and self.ftp_username)
@@ -100,6 +104,7 @@ def load_settings(conn: sqlite3.Connection) -> SmartModeSettings:
         ftp_protocol=protocol,
         ftp_enabled=values.get(_SETTING_FTP_ENABLED, "").strip().lower() == "true",
         ignore_folders=parse_ignore_folders(values.get(_SETTING_IGNORE_FOLDERS, "")),
+        ignore_folders_updated_at=values.get(_SETTING_IGNORE_FOLDERS_UPDATED_AT, "").strip(),
     )
 
 
@@ -117,6 +122,7 @@ def save_settings(conn: sqlite3.Connection, settings: SmartModeSettings) -> None
         _SETTING_FTP_PROTOCOL: settings.ftp_protocol.strip().lower(),
         _SETTING_FTP_ENABLED: "true" if settings.ftp_enabled else "false",
         _SETTING_IGNORE_FOLDERS: "\n".join(settings.ignore_folders),
+        _SETTING_IGNORE_FOLDERS_UPDATED_AT: settings.ignore_folders_updated_at,
     }
     for key, value in values.items():
         conn.execute(

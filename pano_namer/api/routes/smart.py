@@ -30,7 +30,14 @@ from pano_namer.schemas import (
     SmartSettingsPayload,
     SmartSettingsResponse,
 )
-from pano_namer.services import ftp_export, pano_registry, sd_card, shared_naming, smart_mode
+from pano_namer.services import (
+    ftp_export,
+    ignore_folders_sync,
+    pano_registry,
+    sd_card,
+    shared_naming,
+    smart_mode,
+)
 from pano_namer.services.common import utc_now
 from pano_namer.services.shared_naming import SharedNamingError
 
@@ -79,6 +86,7 @@ def register_smart_routes(
     def put_smart_settings(payload: SmartSettingsPayload) -> dict[str, Any]:
         with db.connect() as conn:
             settings = smart_mode.load_settings(conn)
+            old_ignore = list(settings.ignore_folders)
             for field_name in (
                 "ui_mode",
                 "import_base_path",
@@ -107,10 +115,23 @@ def register_smart_routes(
                     status_code=400,
                     detail="ftp_protocol must be 'ftp', 'ftps', or 'sftp'.",
                 )
+            # Stamp the ignore list when it changes so supabase last-writer-wins
+            # sync can order edits across machines.
+            normalized_ignore = smart_mode.parse_ignore_folders(
+                "\n".join(settings.ignore_folders)
+            )
+            settings.ignore_folders = normalized_ignore
+            if normalized_ignore != old_ignore:
+                settings.ignore_folders_updated_at = utc_now()
             smart_mode.save_settings(conn, settings)
             conn.commit()
             settings = smart_mode.load_settings(conn)
         return settings_response(settings)
+
+    @app.post("/api/smart/ignore-folders/sync")
+    def sync_ignore_folders() -> dict[str, Any]:
+        """Two-way sync the global ignore list with Supabase (best-effort)."""
+        return ignore_folders_sync.run_ignore_folders_sync(db)
 
     @app.get("/api/smart/drives", response_model=SmartDrivesResponse)
     def list_smart_drives() -> dict[str, Any]:
