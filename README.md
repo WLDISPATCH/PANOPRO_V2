@@ -20,7 +20,14 @@ Windows-first, web-ready app for importing DJI 360 photos, matching them to DXF-
 ## Quick Install (New Machine)
 
 For setting up a fresh computer, use the one-click installer instead of the
-manual steps below:
+manual steps below.
+
+**Fastest — one file, no manual download:** copy **`bootstrap.bat`** to the
+machine and double-click it. It downloads the whole app from GitHub into
+`%LOCALAPPDATA%\PANO PRO`, installs everything, and creates the desktop
+shortcut. Re-running it updates in place and preserves your data.
+
+**Or from a downloaded copy:**
 
 1. Download and unzip this repository.
 2. Double-click **`install.bat`** in the unzipped folder.
