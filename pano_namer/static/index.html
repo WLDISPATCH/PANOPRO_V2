@@ -533,6 +533,11 @@
                 <span>Export end location</span>
                 <input id="smart-archive-base" type="text" placeholder="D:\PanoArchive" autocomplete="off">
               </label>
+              <label class="settings-field">
+                <span>Ignore folders during import</span>
+                <textarea id="smart-ignore-folders" rows="3" placeholder="One folder name per line, e.g.&#10;RAW&#10;TILES" autocomplete="off"></textarea>
+              </label>
+              <p class="muted settings-hint">Panos inside any folder with one of these names (at any depth on the card) are skipped during Smart Import. Case-insensitive. Synced across computers.</p>
               <details class="settings-collapse settings-collapse-nested">
                 <summary>Upload server</summary>
                 <label class="settings-field settings-field-inline">

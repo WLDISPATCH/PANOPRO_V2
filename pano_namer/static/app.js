@@ -115,6 +115,7 @@ const elements = {
   reviewDescription: document.getElementById("review-description"),
   smartImportBase: document.getElementById("smart-import-base"),
   smartArchiveBase: document.getElementById("smart-archive-base"),
+  smartIgnoreFolders: document.getElementById("smart-ignore-folders"),
   smartFtpHost: document.getElementById("smart-ftp-host"),
   smartFtpPort: document.getElementById("smart-ftp-port"),
   smartFtpUsername: document.getElementById("smart-ftp-username"),
@@ -2929,6 +2930,7 @@ async function loadSmartSettings() {
   state.smartSettings = settings;
   elements.smartImportBase.value = settings.import_base_path || "";
   elements.smartArchiveBase.value = settings.archive_base_path || "";
+  elements.smartIgnoreFolders.value = (settings.ignore_folders || []).join("\n");
   elements.smartFtpHost.value = settings.ftp_host || "";
   elements.smartFtpPort.value = settings.ftp_port > 0 ? settings.ftp_port : "";
   elements.smartFtpUsername.value = settings.ftp_username || "";
@@ -2946,6 +2948,10 @@ async function saveSmartSettings() {
     body: JSON.stringify({
       import_base_path: elements.smartImportBase.value.trim(),
       archive_base_path: elements.smartArchiveBase.value.trim(),
+      ignore_folders: elements.smartIgnoreFolders.value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
       ftp_host: elements.smartFtpHost.value.trim(),
       ftp_port: Number(elements.smartFtpPort.value) || 0,
       ftp_username: elements.smartFtpUsername.value.trim(),

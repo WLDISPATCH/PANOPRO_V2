@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pano_namer.services.common import utc_now
 
@@ -17,6 +17,27 @@ _SETTING_FTP_PASSWORD = "smart_mode.ftp_password"
 _SETTING_FTP_REMOTE_PATH = "smart_mode.ftp_remote_path"
 _SETTING_FTP_PROTOCOL = "smart_mode.ftp_protocol"
 _SETTING_FTP_ENABLED = "smart_mode.ftp_enabled"
+_SETTING_IGNORE_FOLDERS = "smart_mode.ignore_folders"
+
+
+def parse_ignore_folders(raw: str) -> list[str]:
+    """Parse the stored ignore-folder list (newline- or comma-separated).
+
+    Folder names are matched case-insensitively during import scans, so we
+    keep the first-seen casing and drop blanks/duplicates.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for chunk in raw.replace(",", "\n").splitlines():
+        name = chunk.strip().strip("/\\").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
 
 UI_MODE_ADVANCED = "advanced"
 UI_MODE_SMART = "smart"
@@ -41,6 +62,7 @@ class SmartModeSettings:
     ftp_remote_path: str = ""
     ftp_protocol: str = PROTOCOL_FTP
     ftp_enabled: bool = False
+    ignore_folders: list[str] = field(default_factory=list)
 
     def ftp_configured(self) -> bool:
         return bool(self.ftp_host and self.ftp_username)
@@ -77,6 +99,7 @@ def load_settings(conn: sqlite3.Connection) -> SmartModeSettings:
         ftp_remote_path=values.get(_SETTING_FTP_REMOTE_PATH, "").strip(),
         ftp_protocol=protocol,
         ftp_enabled=values.get(_SETTING_FTP_ENABLED, "").strip().lower() == "true",
+        ignore_folders=parse_ignore_folders(values.get(_SETTING_IGNORE_FOLDERS, "")),
     )
 
 
@@ -93,6 +116,7 @@ def save_settings(conn: sqlite3.Connection, settings: SmartModeSettings) -> None
         _SETTING_FTP_REMOTE_PATH: settings.ftp_remote_path.strip(),
         _SETTING_FTP_PROTOCOL: settings.ftp_protocol.strip().lower(),
         _SETTING_FTP_ENABLED: "true" if settings.ftp_enabled else "false",
+        _SETTING_IGNORE_FOLDERS: "\n".join(settings.ignore_folders),
     }
     for key, value in values.items():
         conn.execute(

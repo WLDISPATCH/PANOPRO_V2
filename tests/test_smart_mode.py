@@ -91,6 +91,30 @@ class TestScanForPanos:
         result = sd_card.scan_for_panos(tmp_path)
         assert len(result.panos) == 1
 
+    def test_scan_skips_ignored_folders_case_insensitively(self, tmp_path):
+        keep = tmp_path / "DCIM" / "GOOD"
+        skip = tmp_path / "DCIM" / "Raw"
+        nested_skip = tmp_path / "DCIM" / "GOOD" / "tiles"
+        keep.mkdir(parents=True)
+        skip.mkdir(parents=True)
+        nested_skip.mkdir(parents=True)
+        make_jpeg(keep / "keep.jpg", 14400, 7200, PANO_XMP)
+        make_jpeg(skip / "skip.jpg", 14400, 7200, PANO_XMP)
+        make_jpeg(nested_skip / "nested.jpg", 14400, 7200, PANO_XMP)
+
+        # "raw" (different case) and "TILES" (nested) are excluded.
+        result = sd_card.scan_for_panos(tmp_path, ignore_folders=["raw", "TILES"])
+
+        names = {pano.original_name for pano in result.panos}
+        assert names == {"keep.jpg"}
+
+    def test_scan_without_ignore_list_keeps_everything(self, tmp_path):
+        raw = tmp_path / "DCIM" / "Raw"
+        raw.mkdir(parents=True)
+        make_jpeg(raw / "a.jpg", 14400, 7200, PANO_XMP)
+        result = sd_card.scan_for_panos(tmp_path)
+        assert len(result.panos) == 1
+
 
 class TestRegistryDuplicates:
     ROWS = [
@@ -165,6 +189,17 @@ class TestSmartModeSettings:
         assert settings.resolved_port() == 22
         settings.ftp_port = 2222
         assert settings.resolved_port() == 2222
+
+    def test_ignore_folders_roundtrip(self, conn):
+        settings = smart_mode.SmartModeSettings(ignore_folders=["Raw", "Tiles"])
+        smart_mode.save_settings(conn, settings)
+        conn.commit()
+        loaded = smart_mode.load_settings(conn)
+        assert loaded.ignore_folders == ["Raw", "Tiles"]
+
+    def test_parse_ignore_folders_dedupes_and_splits(self):
+        parsed = smart_mode.parse_ignore_folders("Raw, Raw\n Tiles \n\n/RAW/,working")
+        assert parsed == ["Raw", "Tiles", "working"]
 
     def test_unknown_protocol_falls_back_to_ftp(self, conn):
         settings = smart_mode.SmartModeSettings(ftp_protocol="gopher")
