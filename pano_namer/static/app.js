@@ -61,6 +61,14 @@ const state = {
   mapVisibility: {
     showProcessed: false,
   },
+  // Recent-only map filter (issue #33): by default hide panos older than
+  // `days` days. From/To override the rolling window with an explicit range.
+  mapDateFilter: {
+    enabled: true,
+    days: 7,
+    from: "",
+    to: "",
+  },
   mapLabels: {
     enabled: false,
     showOriginal: false,
@@ -212,6 +220,10 @@ const elements = {
   mapDataDetail: document.getElementById("map-data-detail"),
   drawAreaButton: document.getElementById("draw-area-button"),
   mapShowProcessedToggle: document.getElementById("map-show-processed-toggle"),
+  mapRecentToggle: document.getElementById("map-recent-toggle"),
+  mapDateFrom: document.getElementById("map-date-from"),
+  mapDateTo: document.getElementById("map-date-to"),
+  mapDateClear: document.getElementById("map-date-clear"),
   mapLabelsToggle: document.getElementById("map-labels-toggle"),
   mapOriginalLabelToggle: document.getElementById("map-original-label-toggle"),
   mapProposedLabelToggle: document.getElementById("map-proposed-label-toggle"),
@@ -1882,8 +1894,37 @@ function syncMapAreaDraft(selectedPhoto) {
   }
 }
 
+// Resolve the active capture-date window, or null when date filtering is off.
+// An explicit From/To range wins; otherwise it's a rolling "last N days".
+function mapDateBounds() {
+  const filter = state.mapDateFilter;
+  if (!filter.enabled) return null;
+  let start = null;
+  let end = null;
+  if (filter.from) start = new Date(`${filter.from}T00:00:00`);
+  if (filter.to) end = new Date(`${filter.to}T23:59:59.999`);
+  if (!start && !end) {
+    start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - filter.days);
+  }
+  return { start, end };
+}
+
 function visibleMapPhotos() {
-  return (state.mapData?.photos || []).filter((photo) => state.mapVisibility.showProcessed || !photo.applied);
+  const bounds = mapDateBounds();
+  return (state.mapData?.photos || []).filter((photo) => {
+    if (!(state.mapVisibility.showProcessed || !photo.applied)) return false;
+    // Undated panos are never hidden by the date filter (don't lose unknowns).
+    if (bounds && photo.capture_ts) {
+      const captured = new Date(photo.capture_ts);
+      if (!Number.isNaN(captured.getTime())) {
+        if (bounds.start && captured < bounds.start) return false;
+        if (bounds.end && captured > bounds.end) return false;
+      }
+    }
+    return true;
+  });
 }
 
 function boundsFromMapData() {
@@ -2194,6 +2235,10 @@ function leafletDataKey() {
     state.mapLabels.enabled,
     state.mapLabels.showOriginal,
     state.mapLabels.showProposed,
+    state.mapDateFilter.enabled,
+    state.mapDateFilter.days,
+    state.mapDateFilter.from,
+    state.mapDateFilter.to,
   ].join("|");
 }
 
@@ -3664,6 +3709,39 @@ function handleMapVisibilityChange() {
   renderMap();
 }
 
+function handleMapDateFilterChange() {
+  state.mapDateFilter.enabled = elements.mapRecentToggle.checked;
+  state.mapDateFilter.from = elements.mapDateFrom.value || "";
+  state.mapDateFilter.to = elements.mapDateTo.value || "";
+  // Picking an explicit range implies filtering is on.
+  if (state.mapDateFilter.from || state.mapDateFilter.to) {
+    state.mapDateFilter.enabled = true;
+    elements.mapRecentToggle.checked = true;
+  }
+  syncMapDateControls();
+  renderMap();
+}
+
+function clearMapDateRange() {
+  state.mapDateFilter.from = "";
+  state.mapDateFilter.to = "";
+  elements.mapDateFrom.value = "";
+  elements.mapDateTo.value = "";
+  syncMapDateControls();
+  renderMap();
+}
+
+// Reflect state in the date inputs and show whether the rolling default or an
+// explicit range is active.
+function syncMapDateControls() {
+  const filter = state.mapDateFilter;
+  const usingRange = Boolean(filter.from || filter.to);
+  elements.mapRecentToggle.parentElement.querySelector("span:last-child").textContent =
+    usingRange ? "Custom range" : `Last ${filter.days} days only`;
+  elements.mapDateFrom.disabled = !filter.enabled;
+  elements.mapDateTo.disabled = !filter.enabled;
+}
+
 function handleMapDetailClick(event) {
   const mapAction = event.target.closest("[data-map-action]");
   if (mapAction) {
@@ -4092,6 +4170,11 @@ elements.mapLabelsToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapOriginalLabelToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapProposedLabelToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapShowProcessedToggle.addEventListener("change", handleMapVisibilityChange);
+elements.mapRecentToggle.addEventListener("change", handleMapDateFilterChange);
+elements.mapDateFrom.addEventListener("change", handleMapDateFilterChange);
+elements.mapDateTo.addEventListener("change", handleMapDateFilterChange);
+elements.mapDateClear.addEventListener("click", clearMapDateRange);
+syncMapDateControls();
 elements.zoomResetButton.addEventListener("click", () => {
   resetMapView();
 });
