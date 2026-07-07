@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/static/vendor/psv/core/index.css">
   <link rel="stylesheet" href="/static/vendor/psv/markers/index.css">
   <link rel="stylesheet" href="/static/vendor/psv/compass/index.css">
-  <link rel="stylesheet" href="/static/styles.css?v=2.7.6">
+  <link rel="stylesheet" href="/static/styles.css?v=2.7.7">
   <script type="importmap">
   {
     "imports": {
@@ -249,6 +249,22 @@
                 <span>Overlay</span>
                 <select id="map-overlay-select"></select>
               </label>
+            </div>
+            <div class="map-command-group">
+              <span>Date</span>
+              <label class="toggle-chip">
+                <input id="map-recent-toggle" type="checkbox" checked>
+                <span>Last 7 days only</span>
+              </label>
+              <label class="map-date-field">
+                <span>From</span>
+                <input id="map-date-from" type="date">
+              </label>
+              <label class="map-date-field">
+                <span>To</span>
+                <input id="map-date-to" type="date">
+              </label>
+              <button id="map-date-clear" class="secondary" type="button">Clear dates</button>
             </div>
             <div class="map-command-group">
               <span>Tools</span>
@@ -671,7 +687,7 @@
 
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script src="/static/vendor/leaflet/leaflet.js"></script>
-  <script type="module" src="/static/viewer360.js?v=2.7.6"></script>
-  <script src="/static/app.js?v=2.7.6"></script>
+  <script type="module" src="/static/viewer360.js?v=2.7.7"></script>
+  <script src="/static/app.js?v=2.7.7"></script>
 </body>
 </html>

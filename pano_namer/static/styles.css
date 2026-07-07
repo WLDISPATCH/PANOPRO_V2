@@ -2063,6 +2063,27 @@ button:disabled:hover {
   text-transform: uppercase;
 }
 
+.map-date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.map-date-field input[type="date"] {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font: inherit;
+  color: inherit;
+}
+
+.map-date-field input[type="date"]:disabled {
+  opacity: 0.5;
+}
+
 .map-legend {
   display: flex;
   gap: 14px;
