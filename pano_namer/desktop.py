@@ -109,34 +109,89 @@ def _append_recent_windows_faults(handle) -> None:
     threading.Thread(target=worker, name="fault-log-scan", daemon=True).start()
 
 
-def configure_webengine() -> str:
-    """Harden QtWebEngine's Chromium bring-up against GPU crashes.
+_RENDER_STATE_FILE = Path.home() / ".pano_namer_render_state.json"
 
-    Field machines (issues #21, #26) die with an access violation inside
-    Qt6WebEngineCore.dll — Chromium's GPU path faulting against the display
-    driver, not our code. It happens both at launch and mid-session (e.g. on
-    the map), and relaxing only the sandbox was not enough. So by default we
-    route Chromium's ANGLE layer through the SwiftShader software backend
-    (--use-angle=swiftshader): every bit of GPU work, including WebGL, is done
-    in software and the real driver is never touched, which removes the fault.
-    Crucially this keeps WebGL working for the 360 viewer (just slower) —
-    unlike --disable-gpu, which disables WebGL entirely in Qt 6.9.
 
-    Escape hatches:
-      PANOPRO_FORCE_GPU=1     use the real GPU (faster 360 viewer) on machines
-                              that are known stable
-      PANOPRO_CHROMIUM_FLAGS  replace the default Chromium flag string entirely
+def resolve_render_mode(state_file: Path = _RENDER_STATE_FILE) -> str:
+    """Decide 'gpu' or 'software' rendering, with crash auto-fallback.
+
+    Machines vary: a healthy GPU runs great with hardware acceleration (and the
+    WebGL 360 viewer), but on some field machines (issues #21/#26/#39) the GPU
+    driver faults inside Qt6WebEngineCore.dll and the app crashes at launch. No
+    single static default fits both, and SwiftShader (the 2.7.6 attempt) turned
+    out to crash healthy machines too (Qt/Chromium shared-image mismatch).
+
+    So we default to the GPU and self-heal: a launch writes a "running"
+    sentinel and clears it on clean exit. A new launch that still finds the
+    sentinel knows the previous run never exited cleanly and counts a crash;
+    after two in a row it permanently falls back to software for this machine.
+    Healthy machines exit cleanly and never trip it.
+
+    We require TWO consecutive crashes before falling back, so a one-off
+    unclean exit (Task Manager kill, power loss, Windows shutdown) doesn't
+    demote a healthy machine — a clean run resets the counter.
+
+    Overrides: PANOPRO_FORCE_GPU=1 pins the GPU (and clears a past fallback);
+    PANOPRO_DISABLE_GPU=1 pins software.
+    """
+    if os.environ.get("PANOPRO_FORCE_GPU") == "1":
+        _write_render_state(state_file, {"running": True, "crashes": 0})
+        return "gpu"
+    if os.environ.get("PANOPRO_DISABLE_GPU") == "1":
+        return "software"
+
+    state = _read_render_state(state_file)
+    if state.get("mode") == "software":
+        return "software"
+    # A leftover "running" flag means the previous launch never cleanly exited.
+    crashes = int(state.get("crashes", 0))
+    if state.get("running"):
+        crashes += 1
+    if crashes >= 2:
+        # Two crashes in a row: this machine's GPU path is genuinely broken.
+        _write_render_state(state_file, {"mode": "software"})
+        return "software"
+    _write_render_state(state_file, {"running": True, "crashes": crashes})
+    return "gpu"
+
+
+def mark_render_clean_exit(state_file: Path = _RENDER_STATE_FILE) -> None:
+    """On a clean shutdown, clear the sentinel and reset the crash counter."""
+    state = _read_render_state(state_file)
+    if state.get("mode") == "software":
+        return
+    _write_render_state(state_file, {})
+
+
+def _read_render_state(state_file: Path) -> dict:
+    try:
+        return json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_render_state(state_file: Path, data: dict) -> None:
+    try:
+        state_file.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def configure_webengine(mode: str) -> str:
+    """Apply Chromium flags for the chosen render mode before QtWebEngine init.
+
+    'gpu' keeps hardware acceleration (relaxed sandbox) so the WebGL 360 viewer
+    works. 'software' disables the GPU entirely — verified stable on a broken
+    driver; the 360 viewer's WebGL is unavailable in this mode, but the app no
+    longer crashes. PANOPRO_CHROMIUM_FLAGS overrides the string entirely.
 
     Chromium reads QTWEBENGINE_CHROMIUM_FLAGS during QtWebEngine init, so this
     must run before QApplication is constructed. Returns the applied flags.
     """
-    if os.environ.get("PANOPRO_FORCE_GPU") == "1":
-        # Opt back into hardware acceleration; keep the sandbox relaxed.
-        default_flags = "--disable-gpu-sandbox --no-sandbox"
+    if mode == "software":
+        default_flags = "--disable-gpu-sandbox --no-sandbox --disable-gpu --disable-gpu-compositing"
     else:
-        # Software rendering via SwiftShader ANGLE: no real GPU driver, but
-        # WebGL still works so the 360 viewer keeps rendering.
-        default_flags = "--disable-gpu-sandbox --no-sandbox --use-angle=swiftshader"
+        default_flags = "--disable-gpu-sandbox --no-sandbox"
     flags = os.environ.get("PANOPRO_CHROMIUM_FLAGS", default_flags)
     existing = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     applied = f"{existing} {flags}".strip()
@@ -224,17 +279,28 @@ def _selection_directory(selection: list[str]) -> Path | None:
 
 
 def main() -> int:
+    import atexit
+
     ensure_std_streams()
     log_path = enable_crash_logging()
     if log_path is not None:
         print(f"Crash log: {log_path}")
 
-    # Set Chromium flags before any QtWebEngine import so they take effect.
-    applied_flags = configure_webengine()
+    # Choose GPU vs software rendering (auto-falls back to software if a prior
+    # launch crashed), then set Qt + Chromium flags before any QtWebEngine
+    # import so they take effect. On a clean exit the crash sentinel is cleared.
+    render_mode = resolve_render_mode()
+    if render_mode == "software":
+        # Match the verified-stable config: force Qt itself to software GL too,
+        # not just Chromium, so the Qt<->Chromium shared-image path stays off
+        # the broken driver (the QDxgiVSyncService crash on FH-UAV-II).
+        os.environ["QT_OPENGL"] = "software"
+    atexit.register(mark_render_clean_exit)
+    applied_flags = configure_webengine(render_mode)
     if log_path is not None:
         try:
             with log_path.open("a", encoding="utf-8", errors="replace") as fh:
-                fh.write(f"QtWebEngine flags: {applied_flags}\n")
+                fh.write(f"Render mode: {render_mode}\nQtWebEngine flags: {applied_flags}\n")
         except OSError:
             pass
 
