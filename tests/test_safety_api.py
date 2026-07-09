@@ -351,6 +351,32 @@ class SafetyApiTests(unittest.TestCase):
         self.assertEqual(rows[1]["error"], "Local file was locked.")
         self.assertIsNotNone(rows[1]["reported_at"])
 
+    def test_area_change_before_export_uses_new_area(self) -> None:
+        # Regression guard: reassigning a pano's area (as the map picker does)
+        # must make export/rename use the NEW area, not the original. Before
+        # 2.7.2 the map required a separate "Save Area" click, so an unsaved
+        # pick silently exported under the old area.
+        first = self.create_area(self.project["id"], AreaCreate(name="Drain"))
+        second = self.create_area(self.project["id"], AreaCreate(name="Pond"))
+        source = self.create_photo("capture.jpg")
+        photo = self.import_with_metadata([source])["imported"][0]
+
+        self.update_photo(
+            self.project["id"], photo["id"],
+            PhotoUpdateRequest(matched_area_id=first["id"]),
+        )
+        # Reassign to the second area, then export.
+        self.update_photo(
+            self.project["id"], photo["id"],
+            PhotoUpdateRequest(matched_area_id=second["id"]),
+        )
+        run = self.run_rename(self.project["id"], RenameRunCreate())
+
+        final_name = Path(run["results"][0]["target_path"]).name
+        self.assertIn("POND", final_name)
+        self.assertNotIn("DRAIN", final_name)
+        self.assertEqual(self.list_photos(self.project["id"])[0]["area_name"], "Pond")
+
     def test_rollback_last_run_restores_file_and_pending_state(self) -> None:
         area = self.create_area(self.project["id"], AreaCreate(name="Drain"))
         source = self.create_photo("capture.jpg")
