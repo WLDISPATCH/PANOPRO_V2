@@ -2688,11 +2688,6 @@ function renderMap() {
     }, 120);
   }
 
-  const visiblePointCount = Object.keys(leaf.markers).length;
-  if (!visiblePointCount && state.photos.length) {
-    setMapStateOverlay("No visible pano points", "Enable Show Processed Panos or adjust imported photo data to display points.");
-  }
-
   if (state.drawArea.active) {
     renderMapDrawDetail();
     return;
