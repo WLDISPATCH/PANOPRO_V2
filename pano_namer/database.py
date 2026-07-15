@@ -566,6 +566,12 @@ def _migrate_area_sync_uid(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE areas ADD COLUMN sync_uid TEXT")
 
 
+def _migrate_overlay_sync_uid(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "overlays")
+    if "sync_uid" not in columns:
+        conn.execute("ALTER TABLE overlays ADD COLUMN sync_uid TEXT")
+
+
 def _migrate_smart_mode(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "photos")
     if "is_panorama" not in columns:
@@ -669,6 +675,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     ("20260703_0012_smart_mode", _migrate_smart_mode),
     ("20260704_0013_purge_orphaned_photo_rows", _migrate_purge_orphaned_photo_rows),
     ("20260704_0014_overlay_tiles", _migrate_overlay_tiles),
+    ("20260715_0015_overlay_sync_uid", _migrate_overlay_sync_uid),
 )
 
 

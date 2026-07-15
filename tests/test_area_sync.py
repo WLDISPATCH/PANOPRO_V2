@@ -55,6 +55,9 @@ class FakeSupabase:
                 if key not in self.files:
                     return 404, b""
                 return 200, self.files[key]
+            if method == "DELETE":
+                existed = self.files.pop(key, None)
+                return (200, b"") if existed is not None else (404, b"")
         return 500, b""
 
 
@@ -219,6 +222,8 @@ class AreaSyncTests(unittest.TestCase):
             conn.commit()
         summary_b = self.machine_b.sync()
         self.assertEqual(summary_b["tombstoned"], 1)
+        # Housekeeping: the deletion removes the file from the bucket too.
+        self.assertEqual(len(self.fake.files), 0)
 
         summary_a = self.machine_a.sync()
         self.assertEqual(summary_a["deactivated"], 1)
