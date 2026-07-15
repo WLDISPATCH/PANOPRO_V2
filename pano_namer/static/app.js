@@ -3169,6 +3169,32 @@ function smartSettingsStatusText(settings) {
     : "Smart Mode is configured. Server upload is off — exports stay local.";
 }
 
+// Smart Mode presents a stripped-down map: current (pending) panos only, with
+// their proposed-name labels always on, and no advanced command-bar controls.
+function applySmartMapDefaults() {
+  if (state.areaEdit.active || state.areaEdit.picking) cancelAreaEdit();
+  if (state.drawArea.active) resetDrawArea();
+
+  state.mapVisibility.showProcessed = false;
+  elements.mapShowProcessedToggle.checked = false;
+
+  state.mapLabels.enabled = true;
+  state.mapLabels.showOriginal = false;
+  state.mapLabels.showProposed = true;
+  elements.mapLabelsToggle.checked = true;
+  elements.mapOriginalLabelToggle.checked = false;
+  elements.mapProposedLabelToggle.checked = true;
+  elements.mapOriginalLabelToggle.disabled = false;
+  elements.mapProposedLabelToggle.disabled = false;
+
+  state.mapDateFilter.enabled = false;
+  state.mapDateFilter.from = "";
+  state.mapDateFilter.to = "";
+  if (elements.mapRecentToggle) elements.mapRecentToggle.checked = false;
+  if (elements.mapDateFrom) elements.mapDateFrom.value = "";
+  if (elements.mapDateTo) elements.mapDateTo.value = "";
+}
+
 function applyUiMode(mode) {
   const smart = mode === "smart";
   document.body.classList.toggle("smart-mode", smart);
@@ -3181,6 +3207,7 @@ function applyUiMode(mode) {
     : "One workspace for spatial review and 360 inspection.";
   elements.modeToggleButton.textContent = smart ? "Switch to Advanced" : "Switch to Smart Mode";
   if (smart) {
+    applySmartMapDefaults();
     setTab("map");
     maybeRefreshMapForTab("map");
   }

@@ -2645,7 +2645,10 @@ body.smart-mode .tab:not([data-tab="review"]) {
   display: none;
 }
 
-body.smart-mode #draw-area-button {
+/* Smart Mode keeps the map clean: only Smart Import/Export + the Map/Viewer
+   switcher. The whole advanced command bar (layers, date filter, area tools)
+   is hidden; labels-on / current-panos-only are forced in applyUiMode(). */
+body.smart-mode .map-command-bar {
   display: none;
 }
 
