@@ -81,6 +81,30 @@ def build_manual_polygon_wkt(coordinates: list[tuple[float, float]]) -> tuple[st
     return _combined_valid_geometry([polygon])
 
 
+def build_manual_multipolygon_wkt(
+    rings: list[list[tuple[float, float]]],
+) -> tuple[str, list[float]]:
+    """Build combined footprint geometry from one or more edited exterior rings.
+
+    Each ring is an exterior boundary (holes are not modeled, matching how areas
+    are drawn and rendered). Used by the map area editor to persist edited
+    multi-polygon geometry; overlapping rings are merged by the union.
+    """
+    from shapely.geometry import Polygon
+
+    polygons: list[Polygon] = []
+    for ring in rings:
+        points = [(float(point[0]), float(point[1])) for point in ring if len(point) >= 2]
+        if len(points) < 3:
+            continue
+        polygon = Polygon(points).buffer(0)
+        if not polygon.is_empty:
+            polygons.append(polygon)
+    if not polygons:
+        raise ValueError("Edited area needs at least one ring with 3 or more points.")
+    return _combined_valid_geometry(polygons)
+
+
 def _extract_kml_polygon_wkt(path: Path) -> tuple[str, list[float]]:
     from pyproj import Transformer
     from shapely.geometry import Polygon

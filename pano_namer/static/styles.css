@@ -615,6 +615,36 @@ button.secondary,
   cursor: crosshair;
 }
 
+.map-canvas.is-area-edit-mode .leaflet-interactive {
+  cursor: pointer;
+}
+
+/* Area editor vertex + midpoint handles (issue #29). */
+.area-vertex-handle {
+  background: #ffffff;
+  border: 2px solid #175c4c;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+
+.area-vertex-handle.is-selected {
+  background: #b8db66;
+  border-color: #175c4c;
+  box-shadow: 0 0 0 3px rgba(184, 219, 102, 0.5);
+}
+
+.area-vertex-add {
+  background: rgba(23, 92, 76, 0.55);
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  cursor: copy;
+}
+
+.area-vertex-add:hover {
+  background: #175c4c;
+}
+
 .muted {
   color: var(--muted);
 }

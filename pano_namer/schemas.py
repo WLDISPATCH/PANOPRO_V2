@@ -127,6 +127,12 @@ class AreaUpdate(BaseModel):
     display_color: str | None = None
 
 
+class AreaGeometryUpdate(BaseModel):
+    # One or more exterior rings, each a list of [x, y] points in the project
+    # CRS (EPSG:26912). Sent by the map area editor when geometry is edited.
+    parts: list[list[list[float]]]
+
+
 class AreaResponse(BaseModel):
     id: int
     project_id: int
