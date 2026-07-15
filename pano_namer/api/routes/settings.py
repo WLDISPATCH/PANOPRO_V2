@@ -16,7 +16,20 @@ from pano_namer.schemas import (
     SharedNamingSettingsResponse,
     SharedNamingTestResponse,
 )
-from pano_namer.services import area_sync, shared_naming
+from pano_namer.services import area_sync, overlay_sync, shared_naming
+
+_SYNC_COUNTER_KEYS = (
+    "pulled_new", "pulled_updated", "pushed_new", "pushed_updated",
+    "deactivated", "tombstoned", "skipped",
+)
+
+
+def _merge_overlay_counts(result: dict, overlay: dict) -> dict:
+    # Overlay sync rides area sync; fold its counts into the same summary.
+    if overlay.get("ok"):
+        for key in _SYNC_COUNTER_KEYS:
+            result[key] = result.get(key, 0) + overlay.get(key, 0)
+    return result
 from pano_namer.services.shared_naming import (
     SharedNamingError,
     SharedNamingSettings,
@@ -64,11 +77,17 @@ def register_settings_routes(app: FastAPI, db: Database, storage: StorageService
         "/api/projects/{project_id}/area-sync/run", response_model=AreaSyncSummary
     )
     def run_area_sync_route(project_id: int) -> dict[str, Any]:
-        return area_sync.run_area_sync(db, storage, project_id)
+        result = area_sync.run_area_sync(db, storage, project_id)
+        overlay = overlay_sync.run_overlay_sync(db, storage, project_id)
+        return _merge_overlay_counts(result, overlay)
 
     @app.post("/api/area-sync/run", response_model=GlobalAreaSyncSummary)
     def run_global_area_sync_route(payload: GlobalAreaSyncRequest) -> dict[str, Any]:
-        return area_sync.run_global_area_sync(db, storage, payload.project_id)
+        result = area_sync.run_global_area_sync(db, storage, payload.project_id)
+        if payload.project_id:
+            overlay = overlay_sync.run_overlay_sync(db, storage, payload.project_id)
+            _merge_overlay_counts(result, overlay)
+        return result
 
     @app.post(
         "/api/settings/shared-naming/test", response_model=SharedNamingTestResponse

@@ -95,6 +95,20 @@ def upload_area_file(settings: SharedNamingSettings, storage_path: str, data: by
         )
 
 
+def delete_area_file(settings: SharedNamingSettings, storage_path: str) -> None:
+    """Remove an area file from the bucket (housekeeping on delete/replace)."""
+    if not storage_path:
+        return
+    status, _body = _request(
+        "DELETE", _storage_url(settings, storage_path), _headers(settings), None
+    )
+    # 404 means it is already gone, which is fine.
+    if status not in {200, 204, 404}:
+        raise SharedNamingUnavailableError(
+            f"Supabase area file delete failed with HTTP {status}."
+        )
+
+
 def download_area_file(settings: SharedNamingSettings, storage_path: str) -> bytes:
     status, body = _request(
         "GET", _storage_url(settings, storage_path), _headers(settings), None
@@ -197,6 +211,7 @@ def _push_area(
     uid: str,
     *,
     deleted_at: str | None = None,
+    old_file_path: str | None = None,
 ) -> None:
     registry_row: dict[str, Any] = {
         "uid": uid,
@@ -213,6 +228,13 @@ def _push_area(
         ext = managed.suffix.lower() or ".kml"
         storage_path = f"{template_slug(template_name)}/{uid}{ext}"
         upload_area_file(settings, storage_path, data)
+        # Replace housekeeping: if the file moved (e.g. extension changed), drop
+        # the stale copy so old files don't pile up. Best-effort.
+        if old_file_path and old_file_path != storage_path:
+            try:
+                delete_area_file(settings, old_file_path)
+            except SharedNamingUnavailableError:
+                pass
         registry_row.update(
             {
                 "file_ext": ext,
@@ -221,13 +243,12 @@ def _push_area(
             }
         )
     else:
-        registry_row.update(
-            {
-                "file_ext": Path(row["dxf_managed_path"] or "x.kml").suffix.lower() or ".kml",
-                "file_hash": "",
-                "file_path": f"{template_slug(template_name)}/{uid}",
-            }
-        )
+        ext = Path(row["dxf_managed_path"] or "x.kml").suffix.lower() or ".kml"
+        stored_path = old_file_path or f"{template_slug(template_name)}/{uid}{ext}"
+        # Delete housekeeping: remove the file from the bucket (a failure here
+        # propagates so the sync retries; the tombstone row itself is kept).
+        delete_area_file(settings, stored_path)
+        registry_row.update({"file_ext": ext, "file_hash": "", "file_path": ""})
     upsert_remote_area(settings, registry_row)
     if not row["sync_uid"]:
         conn.execute("UPDATE areas SET sync_uid = ? WHERE id = ?", (uid, row["id"]))
@@ -397,7 +418,10 @@ def run_area_sync(db, storage, project_id: int) -> dict[str, Any]:
                     deleted_ts = _parse_ts(remote["deleted_at"])
                     if local is not None and local["active"]:
                         if local_ts and local_ts > deleted_ts:
-                            _push_area(conn, settings, template_name, local, uid)
+                            _push_area(
+                                conn, settings, template_name, local, uid,
+                                old_file_path=remote.get("file_path"),
+                            )
                             summary["pushed_updated"] += 1
                         else:
                             conn.execute(
@@ -419,6 +443,7 @@ def run_area_sync(db, storage, project_id: int) -> dict[str, Any]:
                         _push_area(
                             conn, settings, template_name, local, uid,
                             deleted_at=local["updated_at"],
+                            old_file_path=remote.get("file_path"),
                         )
                         summary["tombstoned"] += 1
                     else:
@@ -439,7 +464,10 @@ def run_area_sync(db, storage, project_id: int) -> dict[str, Any]:
                 if not file_changed and not meta_changed:
                     continue
                 if local_ts and local_ts > remote_ts:
-                    _push_area(conn, settings, template_name, local, uid)
+                    _push_area(
+                        conn, settings, template_name, local, uid,
+                        old_file_path=remote.get("file_path"),
+                    )
                     summary["pushed_updated"] += 1
                 else:
                     _pull_update(
