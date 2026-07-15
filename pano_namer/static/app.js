@@ -19,6 +19,7 @@ const state = {
   mapDataSerialized: null,
   selectedOverlayId: null,
   overlayHidden: false,
+  overlayMenuOpen: false,
   mapDataLoading: false,
   mapDataError: null,
   mapDataRequestKey: null,
@@ -229,6 +230,7 @@ const elements = {
   mapSelectedStatus: document.getElementById("map-selected-status"),
   mapOverlayStatus: document.getElementById("map-overlay-status"),
   mapOverlayChip: document.getElementById("map-overlay-chip"),
+  mapOverlayOptions: document.getElementById("map-overlay-options"),
   mapDataStatus: document.getElementById("map-data-status"),
   mapDataDetail: document.getElementById("map-data-detail"),
   drawAreaButton: document.getElementById("draw-area-button"),
@@ -2006,10 +2008,7 @@ function renderMapSummary() {
   elements.mapSelectedLabel.textContent = selected ? baseName(selected.proposed_filename || selected.final_filename || selected.original_path) : "None";
   elements.mapSelectedStatus.textContent = selected ? photoMapStatus(selected) : "Select a pano point";
   elements.mapOverlayStatus.textContent = mapOverlayStatusText();
-  if (elements.mapOverlayChip) {
-    // The chip is only an actionable switcher when there is an overlay.
-    elements.mapOverlayChip.disabled = overlayChoices().length === 0;
-  }
+  renderOverlaySwitch();
   elements.mapDataStatus.textContent = dataStatus.label;
   elements.mapDataDetail.textContent = dataStatus.detail;
 }
@@ -2283,26 +2282,54 @@ function overlayChoices() {
   return state.mapData?.overlay ? [state.mapData.overlay] : [];
 }
 
-// Overlay chip acts as a switcher: cycle overlay1 -> overlay2 -> ... -> Hidden.
-// With a single overlay this is just a show/hide toggle.
-function cycleMapOverlay() {
+// The overlay chip opens an in-page dropdown (native <select> popups render
+// badly in QtWebEngine) to switch between overlays or hide the overlay.
+function renderOverlaySwitch() {
+  const list = elements.mapOverlayOptions;
+  if (!list || !elements.mapOverlayChip) return;
   const choices = overlayChoices();
-  if (!choices.length) return;
-  let index;
-  if (state.overlayHidden) {
-    index = choices.length; // the "hidden" slot
-  } else {
-    const active = activeMapOverlay();
-    index = active ? choices.findIndex((item) => item.id === active.id) : 0;
-    if (index < 0) index = 0;
+  elements.mapOverlayChip.disabled = choices.length === 0;
+  if (!choices.length) state.overlayMenuOpen = false;
+  elements.mapOverlayChip.setAttribute(
+    "aria-expanded",
+    state.overlayMenuOpen ? "true" : "false",
+  );
+  list.classList.toggle("is-open", state.overlayMenuOpen && choices.length > 0);
+  if (!state.overlayMenuOpen || !choices.length) {
+    list.innerHTML = "";
+    return;
   }
-  const next = (index + 1) % (choices.length + 1);
-  if (next === choices.length) {
+  const active = activeMapOverlay();
+  const options = choices.map((item) => {
+    const isActive = !state.overlayHidden && active && active.id === item.id;
+    return `<button class="area-option${isActive ? " is-active" : ""}" type="button" data-overlay-choice="${item.id}">${escapeHtml(overlayDisplayName(item))}</button>`;
+  });
+  options.push(
+    `<button class="area-option${state.overlayHidden ? " is-active" : ""}" type="button" data-overlay-choice="hidden">Hide overlay</button>`,
+  );
+  list.innerHTML = options.join("");
+}
+
+function toggleOverlayMenu() {
+  if (!overlayChoices().length) return;
+  state.overlayMenuOpen = !state.overlayMenuOpen;
+  renderOverlaySwitch();
+}
+
+function closeOverlayMenu() {
+  if (!state.overlayMenuOpen) return;
+  state.overlayMenuOpen = false;
+  renderOverlaySwitch();
+}
+
+function chooseOverlay(value) {
+  if (value === "hidden") {
     state.overlayHidden = true;
   } else {
     state.overlayHidden = false;
-    state.selectedOverlayId = choices[next].id;
+    state.selectedOverlayId = Number(value) || null;
   }
+  state.overlayMenuOpen = false;
   renderMap();
 }
 
@@ -4180,6 +4207,9 @@ function handleDocumentClick(event) {
   if (!event.target.closest(".app-select")) {
     closeCustomSelect();
   }
+  if (state.overlayMenuOpen && !event.target.closest(".overlay-switch")) {
+    closeOverlayMenu();
+  }
   if (
     state.pendingAreaMenuPhotoId != null &&
     !event.target.closest(".queue-area-picker")
@@ -4304,7 +4334,13 @@ document.getElementById("map-overlay-select").addEventListener("change", (event)
   renderMap();
 });
 if (elements.mapOverlayChip) {
-  elements.mapOverlayChip.addEventListener("click", cycleMapOverlay);
+  elements.mapOverlayChip.addEventListener("click", toggleOverlayMenu);
+}
+if (elements.mapOverlayOptions) {
+  elements.mapOverlayOptions.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-overlay-choice]");
+    if (option) chooseOverlay(option.dataset.overlayChoice);
+  });
 }
 elements.overlayWorkspace.addEventListener("click", (event) => {
   const button = event.target.closest("[data-overlay-action]");
