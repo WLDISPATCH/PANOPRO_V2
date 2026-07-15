@@ -18,6 +18,7 @@ const state = {
   mapData: null,
   mapDataSerialized: null,
   selectedOverlayId: null,
+  overlayHidden: false,
   mapDataLoading: false,
   mapDataError: null,
   mapDataRequestKey: null,
@@ -227,6 +228,7 @@ const elements = {
   mapSelectedLabel: document.getElementById("map-selected-label"),
   mapSelectedStatus: document.getElementById("map-selected-status"),
   mapOverlayStatus: document.getElementById("map-overlay-status"),
+  mapOverlayChip: document.getElementById("map-overlay-chip"),
   mapDataStatus: document.getElementById("map-data-status"),
   mapDataDetail: document.getElementById("map-data-detail"),
   drawAreaButton: document.getElementById("draw-area-button"),
@@ -1975,8 +1977,14 @@ function mapDataStatusText() {
 
 function mapOverlayStatusText() {
   if (state.overlay?.error) return "Warning";
-  if (state.mapData?.overlay?.image_url || state.overlay?.image_url || state.overlay?.preview_url) return "Loaded";
-  return "None";
+  const choices = overlayChoices();
+  if (!choices.length) return "None";
+  if (state.overlayHidden) return "Hidden";
+  if (choices.length > 1) {
+    const active = activeMapOverlay();
+    if (active) return overlayDisplayName(active);
+  }
+  return "Loaded";
 }
 
 function photoMapStatus(photo) {
@@ -1998,6 +2006,10 @@ function renderMapSummary() {
   elements.mapSelectedLabel.textContent = selected ? baseName(selected.proposed_filename || selected.final_filename || selected.original_path) : "None";
   elements.mapSelectedStatus.textContent = selected ? photoMapStatus(selected) : "Select a pano point";
   elements.mapOverlayStatus.textContent = mapOverlayStatusText();
+  if (elements.mapOverlayChip) {
+    // The chip is only an actionable switcher when there is an overlay.
+    elements.mapOverlayChip.disabled = overlayChoices().length === 0;
+  }
   elements.mapDataStatus.textContent = dataStatus.label;
   elements.mapDataDetail.textContent = dataStatus.detail;
 }
@@ -2257,11 +2269,41 @@ function leafletDataKey() {
 }
 
 function activeMapOverlay() {
+  if (state.overlayHidden) return null;
   if (state.selectedOverlayId) {
     const chosen = (state.overlays || []).find((item) => item.id === state.selectedOverlayId);
     if (chosen) return chosen;
   }
   return state.mapData?.overlay || null;
+}
+
+// The overlays available to cycle through on the map.
+function overlayChoices() {
+  if (state.overlays && state.overlays.length) return state.overlays;
+  return state.mapData?.overlay ? [state.mapData.overlay] : [];
+}
+
+// Overlay chip acts as a switcher: cycle overlay1 -> overlay2 -> ... -> Hidden.
+// With a single overlay this is just a show/hide toggle.
+function cycleMapOverlay() {
+  const choices = overlayChoices();
+  if (!choices.length) return;
+  let index;
+  if (state.overlayHidden) {
+    index = choices.length; // the "hidden" slot
+  } else {
+    const active = activeMapOverlay();
+    index = active ? choices.findIndex((item) => item.id === active.id) : 0;
+    if (index < 0) index = 0;
+  }
+  const next = (index + 1) % (choices.length + 1);
+  if (next === choices.length) {
+    state.overlayHidden = true;
+  } else {
+    state.overlayHidden = false;
+    state.selectedOverlayId = choices[next].id;
+  }
+  renderMap();
 }
 
 function renderMapOverlayPicker() {
@@ -3169,6 +3211,32 @@ function smartSettingsStatusText(settings) {
     : "Smart Mode is configured. Server upload is off — exports stay local.";
 }
 
+// Smart Mode presents a stripped-down map: current (pending) panos only, with
+// their proposed-name labels always on, and no advanced command-bar controls.
+function applySmartMapDefaults() {
+  if (state.areaEdit.active || state.areaEdit.picking) cancelAreaEdit();
+  if (state.drawArea.active) resetDrawArea();
+
+  state.mapVisibility.showProcessed = false;
+  elements.mapShowProcessedToggle.checked = false;
+
+  state.mapLabels.enabled = true;
+  state.mapLabels.showOriginal = false;
+  state.mapLabels.showProposed = true;
+  elements.mapLabelsToggle.checked = true;
+  elements.mapOriginalLabelToggle.checked = false;
+  elements.mapProposedLabelToggle.checked = true;
+  elements.mapOriginalLabelToggle.disabled = false;
+  elements.mapProposedLabelToggle.disabled = false;
+
+  state.mapDateFilter.enabled = false;
+  state.mapDateFilter.from = "";
+  state.mapDateFilter.to = "";
+  if (elements.mapRecentToggle) elements.mapRecentToggle.checked = false;
+  if (elements.mapDateFrom) elements.mapDateFrom.value = "";
+  if (elements.mapDateTo) elements.mapDateTo.value = "";
+}
+
 function applyUiMode(mode) {
   const smart = mode === "smart";
   document.body.classList.toggle("smart-mode", smart);
@@ -3181,6 +3249,7 @@ function applyUiMode(mode) {
     : "One workspace for spatial review and 360 inspection.";
   elements.modeToggleButton.textContent = smart ? "Switch to Advanced" : "Switch to Smart Mode";
   if (smart) {
+    applySmartMapDefaults();
     setTab("map");
     maybeRefreshMapForTab("map");
   }
@@ -4213,6 +4282,7 @@ elements.projectSelect.addEventListener("change", () => {
   syncCustomSelect(elements.projectSelect);
   state.currentProjectId = Number(elements.projectSelect.value) || null;
   state.selectedOverlayId = null;
+  state.overlayHidden = false;
   queueMapRefit();
   resetDrawArea();
   state.collapsedProcessedGroups = new Set();
@@ -4230,8 +4300,12 @@ elements.overlayImportButton.addEventListener("click", () => {
 });
 document.getElementById("map-overlay-select").addEventListener("change", (event) => {
   state.selectedOverlayId = Number(event.target.value) || null;
+  state.overlayHidden = false;
   renderMap();
 });
+if (elements.mapOverlayChip) {
+  elements.mapOverlayChip.addEventListener("click", cycleMapOverlay);
+}
 elements.overlayWorkspace.addEventListener("click", (event) => {
   const button = event.target.closest("[data-overlay-action]");
   const action = button?.dataset.overlayAction;

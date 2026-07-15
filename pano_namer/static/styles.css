@@ -1712,6 +1712,24 @@ button:disabled:hover {
   font-weight: 700;
 }
 
+/* The overlay status chip doubles as a switcher button. */
+.status-chip-button {
+  font-family: inherit;
+  line-height: normal;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.status-chip-button:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.status-chip-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .status-chip small {
   color: var(--muted);
   font-size: 0.72rem;
@@ -2645,7 +2663,10 @@ body.smart-mode .tab:not([data-tab="review"]) {
   display: none;
 }
 
-body.smart-mode #draw-area-button {
+/* Smart Mode keeps the map clean: only Smart Import/Export + the Map/Viewer
+   switcher. The whole advanced command bar (layers, date filter, area tools)
+   is hidden; labels-on / current-panos-only are forced in applyUiMode(). */
+body.smart-mode .map-command-bar {
   display: none;
 }
 
