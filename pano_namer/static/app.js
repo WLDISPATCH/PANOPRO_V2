@@ -80,6 +80,17 @@ const state = {
     name: "",
     color: "#175c4c",
   },
+  // Map area geometry editor (issue #29). `picking` waits for an area click;
+  // once editing, `rings` holds the editable exterior rings as {x,y} points.
+  areaEdit: {
+    active: false,
+    picking: false,
+    areaId: null,
+    name: "",
+    color: "#175c4c",
+    rings: [],
+    selected: null,
+  },
   bridge: null,
   modalResolver: null,
 };
@@ -219,6 +230,7 @@ const elements = {
   mapDataStatus: document.getElementById("map-data-status"),
   mapDataDetail: document.getElementById("map-data-detail"),
   drawAreaButton: document.getElementById("draw-area-button"),
+  editAreaButton: document.getElementById("edit-area-button"),
   mapShowProcessedToggle: document.getElementById("map-show-processed-toggle"),
   mapRecentToggle: document.getElementById("map-recent-toggle"),
   mapDateFrom: document.getElementById("map-date-from"),
@@ -2220,6 +2232,8 @@ function ensureLeafletMap() {
     areaLayer: L.layerGroup().addTo(map),
     photoLayer: L.layerGroup().addTo(map),
     drawLayer: L.layerGroup().addTo(map),
+    areaEditLayer: L.layerGroup().addTo(map),
+    areaEditPolys: [],
     markers: {},
     dataKey: null,
     fitted: false,
@@ -2317,12 +2331,16 @@ function syncLeafletLayers(leaf) {
   for (const area of state.mapData?.areas || []) {
     const color = area.display_color || "#175c4c";
     for (const part of area.parts || []) {
-      L.polygon(part.map(([x, y]) => [y, x]), {
+      const polygon = L.polygon(part.map(([x, y]) => [y, x]), {
         color,
         weight: 2,
         fillColor: color,
         fillOpacity: 0.18,
       }).addTo(leaf.areaLayer);
+      // In "Edit Area" pick mode, clicking an area starts the vertex editor.
+      polygon.on("click", () => {
+        if (state.areaEdit.picking) beginAreaEdit(area);
+      });
     }
     if (area.label_anchor?.length === 2) {
       L.tooltip({
@@ -2393,6 +2411,196 @@ function syncDrawLayer(leaf) {
   }
 }
 
+// ---- Area geometry editor (issue #29) ----
+
+function areaVertexIcon(selected) {
+  return L.divIcon({
+    className: `area-vertex-handle${selected ? " is-selected" : ""}`,
+    iconSize: selected ? [16, 16] : [13, 13],
+  });
+}
+
+function areaMidpointIcon() {
+  return L.divIcon({ className: "area-vertex-add", iconSize: [11, 11] });
+}
+
+// Strip a polygon's repeated closing coordinate so editing handles don't stack.
+function ringPointsFromPart(part) {
+  const points = part.map(([x, y]) => ({ x, y }));
+  if (points.length > 1) {
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (Math.abs(first.x - last.x) < 1e-6 && Math.abs(first.y - last.y) < 1e-6) {
+      points.pop();
+    }
+  }
+  return points;
+}
+
+function beginAreaEdit(area) {
+  if (!area) return;
+  state.selectedPhotoId = null;
+  resetDrawArea();
+  state.areaEdit = {
+    active: true,
+    picking: false,
+    areaId: area.id,
+    name: area.name,
+    color: area.display_color || "#175c4c",
+    rings: (area.parts || []).map(ringPointsFromPart).filter((ring) => ring.length >= 3),
+    selected: null,
+  };
+  renderMap();
+}
+
+function cancelAreaEdit() {
+  state.areaEdit = {
+    active: false,
+    picking: false,
+    areaId: null,
+    name: "",
+    color: "#175c4c",
+    rings: [],
+    selected: null,
+  };
+  setHoverSuppressed(false);
+  renderMap();
+}
+
+function toggleAreaEditPick() {
+  if (state.areaEdit.active || state.areaEdit.picking) {
+    cancelAreaEdit();
+    return;
+  }
+  if (state.drawArea.active) resetDrawArea();
+  state.selectedPhotoId = null;
+  state.areaEdit.picking = true;
+  setHoverSuppressed(true);
+  renderMap();
+}
+
+function insertAreaVertex(ringIndex, insertAt, point) {
+  const ring = state.areaEdit.rings[ringIndex];
+  if (!ring) return;
+  ring.splice(insertAt, 0, { x: point.x, y: point.y });
+  state.areaEdit.selected = { ring: ringIndex, idx: insertAt };
+  renderMap();
+}
+
+function deleteSelectedAreaVertex() {
+  const selected = state.areaEdit.selected;
+  if (!selected) return;
+  const ring = state.areaEdit.rings[selected.ring];
+  if (!ring || ring.length <= 3) {
+    setStatus("Each area part needs at least 3 points.", true);
+    return;
+  }
+  ring.splice(selected.idx, 1);
+  state.areaEdit.selected = null;
+  renderMap();
+}
+
+function syncAreaEditLayer(leaf) {
+  leaf.areaEditLayer.clearLayers();
+  leaf.areaEditPolys = [];
+  if (!state.areaEdit.active) return;
+  const color = state.areaEdit.color || "#175c4c";
+  state.areaEdit.rings.forEach((ring, ringIndex) => {
+    const latlngs = ring.map((point) => [point.y, point.x]);
+    const outline = L.polygon(latlngs, {
+      color,
+      weight: 2,
+      dashArray: "6 5",
+      fillColor: color,
+      fillOpacity: 0.12,
+    }).addTo(leaf.areaEditLayer);
+    leaf.areaEditPolys[ringIndex] = outline;
+
+    // Midpoint "add" handles sit on each edge; clicking one inserts a vertex.
+    for (let i = 0; i < ring.length; i += 1) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      L.marker([mid.y, mid.x], { icon: areaMidpointIcon(), keyboard: false })
+        .on("click", () => insertAreaVertex(ringIndex, i + 1, mid))
+        .addTo(leaf.areaEditLayer);
+    }
+
+    // Draggable vertex handles.
+    ring.forEach((point, idx) => {
+      const selected =
+        state.areaEdit.selected &&
+        state.areaEdit.selected.ring === ringIndex &&
+        state.areaEdit.selected.idx === idx;
+      const handle = L.marker([point.y, point.x], {
+        draggable: true,
+        icon: areaVertexIcon(selected),
+        keyboard: false,
+      });
+      handle.on("drag", (event) => {
+        const ll = event.target.getLatLng();
+        ring[idx] = { x: ll.lng, y: ll.lat };
+        outline.setLatLngs(ring.map((pt) => [pt.y, pt.x]));
+      });
+      handle.on("dragend", () => syncAreaEditLayer(leaf));
+      handle.on("click", () => {
+        state.areaEdit.selected = selected ? null : { ring: ringIndex, idx };
+        renderMap();
+      });
+      handle.addTo(leaf.areaEditLayer);
+    });
+  });
+}
+
+function renderAreaEditPickDetail() {
+  elements.mapDetail.innerHTML = `
+    <div class="map-guidance-card draw-active">
+      <strong>Edit Area Mode</strong>
+      <span>Click an area footprint on the map to edit its shape. Click "Edit Area" again to cancel.</span>
+    </div>
+  `;
+}
+
+function renderAreaEditDetail() {
+  const vertexCount = state.areaEdit.rings.reduce((sum, ring) => sum + ring.length, 0);
+  const partCount = state.areaEdit.rings.length;
+  const hasSelection = Boolean(state.areaEdit.selected);
+  elements.mapDetail.innerHTML = `
+    <div class="map-guidance-card draw-active">
+      <strong>Editing: ${escapeHtml(state.areaEdit.name)}</strong>
+      <span>Drag the round handles to move vertices. Click a small + on an edge to add one. Select a handle, then Delete Vertex to remove it. Save syncs the new shape.</span>
+    </div>
+    <div class="detail-form">
+      <div class="muted">${partCount} part${partCount === 1 ? "" : "s"}, ${vertexCount} vertices${hasSelection ? " · 1 selected" : ""}</div>
+      <div class="detail-actions">
+        <button id="area-edit-save" type="button">Save Geometry</button>
+        <button id="area-edit-delete-vertex" class="secondary" type="button" ${hasSelection ? "" : "disabled"}>Delete Vertex</button>
+        <button id="area-edit-cancel" class="secondary" type="button">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+async function saveAreaEdit() {
+  if (!state.currentProjectId || !state.areaEdit.areaId) return;
+  const parts = state.areaEdit.rings
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => ring.map((point) => [point.x, point.y]));
+  if (!parts.length) {
+    setStatus("Each area part needs at least 3 points.", true);
+    return;
+  }
+  const name = state.areaEdit.name;
+  const areaId = state.areaEdit.areaId;
+  await api(`/api/projects/${state.currentProjectId}/areas/${areaId}/geometry`, {
+    method: "PUT",
+    body: JSON.stringify({ parts }),
+  });
+  cancelAreaEdit();
+  await refreshProjectData();
+  setStatus(`Updated geometry for "${name}".`);
+}
+
 function refreshMarkerStyles(leaf) {
   for (const entry of Object.values(leaf.markers)) {
     applyMarkerStyle(entry);
@@ -2432,6 +2640,9 @@ function centerMapOnPhoto(photoId, zoomIn = false) {
 function renderMap() {
   elements.mapCanvas.classList.toggle("is-draw-mode", state.drawArea.active);
   elements.drawAreaButton.classList.toggle("is-active", state.drawArea.active);
+  const editing = state.areaEdit.active || state.areaEdit.picking;
+  elements.mapCanvas.classList.toggle("is-area-edit-mode", editing);
+  if (elements.editAreaButton) elements.editAreaButton.classList.toggle("is-active", editing);
   renderMapSummary();
   renderMapOverlayPicker();
 
@@ -2466,6 +2677,7 @@ function renderMap() {
   syncLeafletLayers(leaf);
   refreshMarkerStyles(leaf);
   syncDrawLayer(leaf);
+  syncAreaEditLayer(leaf);
   if (!leaf.fitted && !fitMapToData(leaf)) {
     // Deferred fit: the container had no size yet (hidden section). The fit
     // completes from setReviewMode when the map mode becomes visible.
@@ -2483,6 +2695,15 @@ function renderMap() {
 
   if (state.drawArea.active) {
     renderMapDrawDetail();
+    return;
+  }
+
+  if (state.areaEdit.active) {
+    renderAreaEditDetail();
+    return;
+  }
+  if (state.areaEdit.picking) {
+    renderAreaEditPickDetail();
     return;
   }
 
@@ -3790,6 +4011,18 @@ function handleMapDetailClick(event) {
     renderMap();
     return;
   }
+  if (event.target.closest("#area-edit-save")) {
+    saveAreaEdit().catch((error) => setStatus(error.message, true));
+    return;
+  }
+  if (event.target.closest("#area-edit-delete-vertex")) {
+    deleteSelectedAreaVertex();
+    return;
+  }
+  if (event.target.closest("#area-edit-cancel")) {
+    cancelAreaEdit();
+    return;
+  }
   const areaTrigger = event.target.closest("#map-area-trigger");
   if (areaTrigger) {
     state.mapAreaMenuOpen = !state.mapAreaMenuOpen;
@@ -4063,6 +4296,7 @@ elements.smartProgressCloseButton.addEventListener("click", () => {
   elements.smartProgressModal.hidden = true;
 });
 elements.drawAreaButton.addEventListener("click", startDrawArea);
+elements.editAreaButton.addEventListener("click", toggleAreaEditPick);
 elements.addAreaButton.addEventListener("click", () => {
   addArea().catch((error) => setStatus(error.message, true));
 });

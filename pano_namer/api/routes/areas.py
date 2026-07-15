@@ -10,9 +10,18 @@ from fastapi import FastAPI, HTTPException, Request
 from pano_namer.area_colors import next_available_area_color, normalize_area_color
 from pano_namer.config import FIXED_CRS
 from pano_namer.database import Database
-from pano_namer.schemas import AreaCreate, AreaResponse, AreaUpdate
+from pano_namer.schemas import (
+    AreaCreate,
+    AreaGeometryUpdate,
+    AreaResponse,
+    AreaUpdate,
+)
 from pano_namer.services.common import dumps_json, ensure_path, utc_now
-from pano_namer.services.dxf import build_manual_polygon_wkt, extract_area_geometry_wkt
+from pano_namer.services.dxf import (
+    build_manual_multipolygon_wkt,
+    build_manual_polygon_wkt,
+    extract_area_geometry_wkt,
+)
 from pano_namer.services.matching import choose_area_match
 from pano_namer.services.rename import plan_renames
 from pano_namer.services.storage import StorageService
@@ -357,6 +366,70 @@ def register_area_routes(app: FastAPI, db: Database, storage: StorageService) ->
                     source_crs,
                     footprint_wkt,
                     bbox_json,
+                    now,
+                    area_id,
+                    project_id,
+                ),
+            )
+            refresh_pending_photo_matches(conn, project_id)
+            conn.commit()
+            row = conn.execute("SELECT * FROM areas WHERE id = ?", (area_id,)).fetchone()
+        return row_to_area(row)
+
+    @app.put(
+        "/api/projects/{project_id}/areas/{area_id}/geometry",
+        response_model=AreaResponse,
+    )
+    def update_area_geometry(
+        project_id: int, area_id: int, payload: AreaGeometryUpdate
+    ) -> dict[str, Any]:
+        """Persist edited polygon geometry from the map area editor (issue #29).
+
+        Rebuilds the footprint from the edited exterior rings and writes a fresh
+        KML so area sync detects the change (via file hash + updated_at) and
+        pushes it. Pending photos are re-matched against the new geometry.
+        """
+        from pano_namer.services.area_sync import kml_for_polygon_wkt
+
+        try:
+            footprint_wkt, bbox = build_manual_multipolygon_wkt(payload.parts)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        now = utc_now()
+        with db.connect() as conn:
+            fetch_project(conn, project_id)
+            area = conn.execute(
+                "SELECT * FROM areas WHERE id = ? AND project_id = ?",
+                (area_id, project_id),
+            ).fetchone()
+            if area is None:
+                raise HTTPException(status_code=404, detail="Area not found")
+
+            # Back the edited geometry with a KML so it syncs like a drawn area.
+            areas_dir = storage.project_dir(project_id) / "areas"
+            areas_dir.mkdir(parents=True, exist_ok=True)
+            kml_path = areas_dir / f"edited_{area_id}_{uuid4().hex[:8]}.kml"
+            try:
+                kml_path.write_bytes(kml_for_polygon_wkt(footprint_wkt))
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400, detail=f"Could not save edited geometry: {exc}"
+                ) from exc
+
+            conn.execute(
+                """
+                UPDATE areas
+                SET dxf_original_path = ?, dxf_managed_path = ?, source_crs = ?,
+                    footprint_wkt = ?, footprint_bbox_json = ?, updated_at = ?
+                WHERE id = ? AND project_id = ?
+                """,
+                (
+                    str(kml_path),
+                    str(kml_path),
+                    FIXED_CRS,
+                    footprint_wkt,
+                    dumps_json(bbox),
                     now,
                     area_id,
                     project_id,
