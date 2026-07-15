@@ -51,6 +51,9 @@ class FakeSupabase:
                 if key not in self.files:
                     return 404, b""
                 return 200, self.files[key]
+            if method == "DELETE":
+                existed = self.files.pop(key, None)
+                return (200, b"") if existed is not None else (404, b"")
         return 500, b""
 
 
@@ -166,6 +169,26 @@ class OverlaySyncTests(unittest.TestCase):
         self.assertEqual(rows[0]["display_name"], "Shared Map")
         self.assertEqual(rows[0]["sync_uid"], uid)
         self.assertTrue(Path(rows[0]["jpg_managed_path"]).exists())
+
+    def test_deleting_overlay_removes_file_from_bucket(self) -> None:
+        pid = self._make_project("T")
+        image = self._make_overlay_image(pid)
+        overlay_id = self._insert_overlay(pid, image)
+        with patch.object(overlay_sync, "_request", self.fake.request):
+            overlay_sync.run_overlay_sync(self.db, self.storage, pid)  # push
+            self.assertEqual(len(self.fake.files), 1)
+            # Delete the overlay locally, then sync again.
+            with self.db.connect() as conn:
+                conn.execute(
+                    "UPDATE overlays SET active = 0, updated_at = ? WHERE id = ?",
+                    (utc_now(), overlay_id),
+                )
+                conn.commit()
+            result = overlay_sync.run_overlay_sync(self.db, self.storage, pid)
+        self.assertEqual(result["tombstoned"], 1)
+        self.assertEqual(len(self.fake.files), 0)  # file removed, not orphaned
+        row = self.fake.rows[next(iter(self.fake.rows))]
+        self.assertIsNotNone(row["deleted_at"])  # tombstone row kept
 
     def test_noop_when_sync_disabled(self) -> None:
         pid = self._make_project("T3")

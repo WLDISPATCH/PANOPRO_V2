@@ -98,6 +98,19 @@ def upload_overlay_file(settings: SharedNamingSettings, storage_path: str, data:
         )
 
 
+def delete_overlay_file(settings: SharedNamingSettings, storage_path: str) -> None:
+    """Remove an overlay file from the bucket (housekeeping on delete/replace)."""
+    if not storage_path:
+        return
+    status, _body = _request(
+        "DELETE", _storage_url(settings, storage_path), _headers(settings), None
+    )
+    if status not in {200, 204, 404}:
+        raise SharedNamingUnavailableError(
+            f"Supabase overlay file delete failed with HTTP {status}."
+        )
+
+
 def download_overlay_file(settings: SharedNamingSettings, storage_path: str) -> bytes:
     status, body = _request(
         "GET", _storage_url(settings, storage_path), _headers(settings), None
@@ -127,7 +140,7 @@ def _local_file_hash(row) -> str | None:
     return file_sha256(path)
 
 
-def _push_overlay(conn, settings, template_name, row, uid, *, deleted_at=None) -> None:
+def _push_overlay(conn, settings, template_name, row, uid, *, deleted_at=None, old_file_path=None) -> None:
     registry_row: dict[str, Any] = {
         "uid": uid,
         "template_name": template_name,
@@ -146,14 +159,21 @@ def _push_overlay(conn, settings, template_name, row, uid, *, deleted_at=None) -
         ext = managed.suffix.lower() or ".png"
         storage_path = f"{template_slug(template_name)}/{uid}{ext}"
         upload_overlay_file(settings, storage_path, data)
+        # Replace housekeeping: drop the stale file if it moved (best-effort).
+        if old_file_path and old_file_path != storage_path:
+            try:
+                delete_overlay_file(settings, old_file_path)
+            except SharedNamingUnavailableError:
+                pass
         registry_row.update(
             {"file_ext": ext, "file_hash": sha256(data).hexdigest(), "file_path": storage_path}
         )
     else:
         ext = Path(row["jpg_managed_path"] or "x.png").suffix.lower() or ".png"
-        registry_row.update(
-            {"file_ext": ext, "file_hash": "", "file_path": f"{template_slug(template_name)}/{uid}"}
-        )
+        stored_path = old_file_path or f"{template_slug(template_name)}/{uid}{ext}"
+        # Delete housekeeping: remove the file (a failure retries; row is kept).
+        delete_overlay_file(settings, stored_path)
+        registry_row.update({"file_ext": ext, "file_hash": "", "file_path": ""})
     upsert_remote_overlay(settings, registry_row)
     if not row["sync_uid"]:
         conn.execute("UPDATE overlays SET sync_uid = ? WHERE id = ?", (uid, row["id"]))
@@ -290,7 +310,10 @@ def run_overlay_sync(db, storage, project_id: int) -> dict[str, Any]:
                     deleted_ts = _parse_ts(remote["deleted_at"])
                     if local is not None and local["active"]:
                         if local_ts and local_ts > deleted_ts:
-                            _push_overlay(conn, settings, template_name, local, uid)
+                            _push_overlay(
+                                conn, settings, template_name, local, uid,
+                                old_file_path=remote.get("file_path"),
+                            )
                             summary["pushed_updated"] += 1
                         else:
                             conn.execute(
@@ -310,6 +333,7 @@ def run_overlay_sync(db, storage, project_id: int) -> dict[str, Any]:
                         _push_overlay(
                             conn, settings, template_name, local, uid,
                             deleted_at=local["updated_at"],
+                            old_file_path=remote.get("file_path"),
                         )
                         summary["tombstoned"] += 1
                     else:
@@ -326,7 +350,10 @@ def run_overlay_sync(db, storage, project_id: int) -> dict[str, Any]:
                 if not file_changed and not meta_changed:
                     continue
                 if local_ts and local_ts > remote_ts:
-                    _push_overlay(conn, settings, template_name, local, uid)
+                    _push_overlay(
+                        conn, settings, template_name, local, uid,
+                        old_file_path=remote.get("file_path"),
+                    )
                     summary["pushed_updated"] += 1
                 else:
                     _pull_update(
