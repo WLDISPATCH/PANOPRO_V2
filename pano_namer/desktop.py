@@ -112,30 +112,69 @@ def _append_recent_windows_faults(handle) -> None:
 _RENDER_STATE_FILE = Path.home() / ".pano_namer_render_state.json"
 
 
-def resolve_render_mode(state_file: Path = _RENDER_STATE_FILE) -> str:
+# Fall back to software once this many GPU crashes are seen within the window.
+_CRASH_FALLBACK_THRESHOLD = 3
+_CRASH_WINDOW_DAYS = 30
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _recent_crashes(timestamps: list, now_iso: str) -> list:
+    """Keep only crash timestamps within the rolling window (unparseable kept)."""
+    from datetime import datetime, timedelta
+
+    def parse(value):
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    now = parse(now_iso)
+    if now is None:
+        return list(timestamps)
+    cutoff = now - timedelta(days=_CRASH_WINDOW_DAYS)
+    kept = []
+    for value in timestamps:
+        parsed = parse(value)
+        if parsed is None or parsed >= cutoff:
+            kept.append(value)
+    return kept
+
+
+def resolve_render_mode(
+    state_file: Path = _RENDER_STATE_FILE, now_iso: str | None = None
+) -> str:
     """Decide 'gpu' or 'software' rendering, with crash auto-fallback.
 
     Machines vary: a healthy GPU runs great with hardware acceleration (and the
     WebGL 360 viewer), but on some field machines (issues #21/#26/#39) the GPU
-    driver faults inside Qt6WebEngineCore.dll and the app crashes at launch. No
-    single static default fits both, and SwiftShader (the 2.7.6 attempt) turned
-    out to crash healthy machines too (Qt/Chromium shared-image mismatch).
+    driver faults inside Qt6WebEngineCore.dll and the app crashes. No single
+    static default fits both, and SwiftShader (the 2.7.6 attempt) turned out to
+    crash healthy machines too (Qt/Chromium shared-image mismatch).
 
-    So we default to the GPU and self-heal: a launch writes a "running"
-    sentinel and clears it on clean exit. A new launch that still finds the
-    sentinel knows the previous run never exited cleanly and counts a crash;
-    after two in a row it permanently falls back to software for this machine.
-    Healthy machines exit cleanly and never trip it.
+    So we default to the GPU and self-heal. Each launch writes a "running"
+    sentinel (its start time) that a clean exit removes. A later launch that
+    still finds the sentinel knows the previous run never exited cleanly and
+    records a crash timestamp. Once there are ``_CRASH_FALLBACK_THRESHOLD``
+    crashes within the last ``_CRASH_WINDOW_DAYS`` days, we permanently fall
+    back to software for this machine.
 
-    We require TWO consecutive crashes before falling back, so a one-off
-    unclean exit (Task Manager kill, power loss, Windows shutdown) doesn't
-    demote a healthy machine — a clean run resets the counter.
+    The crash history is *rolling*, not consecutive: a clean session between
+    crashes no longer resets the count. (The old "two consecutive" rule never
+    fired in the field — FH-UAV-II crashes mid-session, gets relaunched and
+    used fine, then crashes again, and the clean run in between wiped the
+    counter every time, issue re-reported 2026-07-15.)
 
-    Overrides: PANOPRO_FORCE_GPU=1 pins the GPU (and clears a past fallback);
-    PANOPRO_DISABLE_GPU=1 pins software.
+    Overrides: PANOPRO_FORCE_GPU=1 pins the GPU (and clears a past fallback and
+    crash history); PANOPRO_DISABLE_GPU=1 pins software.
     """
+    now_iso = now_iso or _now_iso()
     if os.environ.get("PANOPRO_FORCE_GPU") == "1":
-        _write_render_state(state_file, {"running": True, "crashes": 0})
+        _write_render_state(state_file, {"running": now_iso, "crashes": []})
         return "gpu"
     if os.environ.get("PANOPRO_DISABLE_GPU") == "1":
         return "software"
@@ -143,24 +182,34 @@ def resolve_render_mode(state_file: Path = _RENDER_STATE_FILE) -> str:
     state = _read_render_state(state_file)
     if state.get("mode") == "software":
         return "software"
-    # A leftover "running" flag means the previous launch never cleanly exited.
-    crashes = int(state.get("crashes", 0))
-    if state.get("running"):
-        crashes += 1
-    if crashes >= 2:
-        # Two crashes in a row: this machine's GPU path is genuinely broken.
-        _write_render_state(state_file, {"mode": "software"})
+
+    raw = state.get("crashes")
+    crashes = list(raw) if isinstance(raw, list) else []
+    running = state.get("running")
+    if running:
+        # Previous launch never cleared its sentinel -> it crashed. Record when
+        # (the crashed run's start time; fall back to now for legacy booleans).
+        crashes.append(running if isinstance(running, str) else now_iso)
+    crashes = _recent_crashes(crashes, now_iso)
+
+    if len(crashes) >= _CRASH_FALLBACK_THRESHOLD:
+        _write_render_state(state_file, {"mode": "software", "crashes": crashes})
         return "software"
-    _write_render_state(state_file, {"running": True, "crashes": crashes})
+    _write_render_state(state_file, {"running": now_iso, "crashes": crashes})
     return "gpu"
 
 
 def mark_render_clean_exit(state_file: Path = _RENDER_STATE_FILE) -> None:
-    """On a clean shutdown, clear the sentinel and reset the crash counter."""
+    """On a clean shutdown, clear only the running sentinel.
+
+    Crucially this preserves the crash history — clearing it here (as an earlier
+    version did) is exactly what stopped the auto-fallback from ever firing.
+    """
     state = _read_render_state(state_file)
     if state.get("mode") == "software":
         return
-    _write_render_state(state_file, {})
+    state.pop("running", None)
+    _write_render_state(state_file, state)
 
 
 def _read_render_state(state_file: Path) -> dict:
