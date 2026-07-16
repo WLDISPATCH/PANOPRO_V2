@@ -16,6 +16,12 @@ REM ==========================================================================
 set "PANOPRO_PY="
 set "PANOPRO_PYW="
 
+REM --- 0) Repo-local .venv: install.bat / update.bat put PANO PRO's ----------
+REM dependencies here, so this must win over any system Python (which may not
+REM have fastapi/PySide6 installed). %~dp0 is this file's folder = repo root.
+if exist "%~dp0.venv\Scripts\python.exe" call :consider "%~dp0.venv\Scripts\python.exe"
+if defined PANOPRO_PY goto :done
+
 REM --- 1) Python launcher (py -3): most reliable on python.org installs ------
 for /f "delims=" %%i in ('py -3 -c "import sys;print(sys.executable)" 2^>nul') do call :consider "%%i"
 if defined PANOPRO_PY goto :done
