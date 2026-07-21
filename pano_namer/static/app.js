@@ -36,6 +36,11 @@ const state = {
   seenProcessedGroups: new Set(),
   leaflet: null,
   mapDataVersion: 0,
+  cloudPanos: [],
+  cloudPanosVersion: 0,
+  cloudPanosLoading: false,
+  cloudPanosError: null,
+  showCloudPanos: false,
   sharedNamingSettings: null,
   smartSettings: null,
   smartBusy: false,
@@ -167,6 +172,10 @@ const elements = {
   photoFolderInput: document.getElementById("photo-folder-input"),
   photosTable: document.getElementById("photos-table"),
   processedTable: document.getElementById("processed-table"),
+  cloudPanosTree: document.getElementById("cloud-panos-tree"),
+  cloudPanosMeta: document.getElementById("cloud-panos-meta"),
+  cloudRefreshButton: document.getElementById("cloud-refresh-button"),
+  mapShowCloudToggle: document.getElementById("map-show-cloud-toggle"),
   pendingCount: document.getElementById("pending-count"),
   pendingGuidance: document.getElementById("pending-guidance"),
   pendingTotalCount: document.getElementById("pending-total-count"),
@@ -897,6 +906,36 @@ async function refreshProjectData() {
     // Error state is handled inside refreshMapData.
   });
   maybeRunAreaSync(projectId);
+  loadCloudPanos().catch(() => {
+    // Error is surfaced via state.cloudPanosError in the cloud section.
+  });
+}
+
+// Pull the org-wide cloud pano list (names + projected locations) for the map
+// and the Completed "Organization (Cloud)" section. Passive: an offline or
+// unconfigured Supabase just leaves the list empty with a note.
+async function loadCloudPanos() {
+  if (state.cloudPanosLoading) return;
+  state.cloudPanosLoading = true;
+  renderCloudPanos();
+  try {
+    const result = await api("/api/cloud-panos", { timeoutMs: 30000 });
+    if (result.ok) {
+      state.cloudPanos = result.panos || [];
+      state.cloudPanosError = null;
+    } else {
+      state.cloudPanos = [];
+      state.cloudPanosError = result.error || "Cloud data unavailable.";
+    }
+  } catch (error) {
+    state.cloudPanos = [];
+    state.cloudPanosError = error.message;
+  } finally {
+    state.cloudPanosLoading = false;
+    state.cloudPanosVersion += 1;
+    renderCloudPanos();
+    renderMap();
+  }
 }
 
 // Fire-and-forget area sync: runs after each project refresh when enabled.
@@ -1048,6 +1087,7 @@ function renderAll() {
   renderOverlayLibrary();
   renderPhotos();
   renderProcessed();
+  renderCloudPanos();
   renderArchive();
   renderCollections();
   renderViewer();
@@ -1424,6 +1464,105 @@ function renderProcessed() {
     }).join("");
     return `${header}${rows}`;
   }).join("");
+}
+
+// ISO-8601 week (Monday-start), per the issue's "Monday-Sunday calendar week".
+function isoWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7; // Mon=1..Sun=7
+  d.setUTCDate(d.getUTCDate() + 4 - day); // shift to the Thursday of this week
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return { year: d.getUTCFullYear(), week };
+}
+
+// Group the org's cloud panos Week -> Date(YYMMDD) -> names. Org-global; the
+// pano_registry is not per-template.
+function cloudPanoGroups() {
+  const weeks = new Map();
+  for (const pano of state.cloudPanos) {
+    const date = pano.capture_ts ? new Date(pano.capture_ts) : null;
+    const valid = date && !Number.isNaN(date.getTime());
+    const { year, week } = valid ? isoWeek(date) : { year: 0, week: 0 };
+    const weekKey = valid ? `cloud-week-${year}-W${String(week).padStart(2, "0")}` : "cloud-week-unknown";
+    const weekLabel = valid ? `${year} · Week ${String(week).padStart(2, "0")}` : "Undated";
+    const dateStamp = valid
+      ? `${String(year).slice(2)}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`
+      : "------";
+    const dateKey = `cloud-date-${weekKey}-${dateStamp}`;
+    let weekEntry = weeks.get(weekKey);
+    if (!weekEntry) {
+      weekEntry = { key: weekKey, label: weekLabel, sort: valid ? year * 100 + week : -1, dates: new Map() };
+      weeks.set(weekKey, weekEntry);
+    }
+    let dateEntry = weekEntry.dates.get(dateKey);
+    if (!dateEntry) {
+      dateEntry = { key: dateKey, label: dateStamp, sort: valid ? date.getTime() : -1, panos: [] };
+      weekEntry.dates.set(dateKey, dateEntry);
+    }
+    dateEntry.panos.push(pano);
+  }
+  const weekList = [...weeks.values()].sort((a, b) => b.sort - a.sort);
+  for (const w of weekList) {
+    w.dateList = [...w.dates.values()].sort((a, b) => b.sort - a.sort);
+    for (const dt of w.dateList) {
+      dt.panos.sort((a, b) => (a.final_name || "").localeCompare(b.final_name || ""));
+    }
+  }
+  return weekList;
+}
+
+function renderCloudPanos() {
+  if (!elements.cloudPanosTree) return;
+  if (state.cloudPanosLoading) {
+    elements.cloudPanosTree.innerHTML = `<p class="muted">Loading cloud data…</p>`;
+    return;
+  }
+  if (state.cloudPanosError) {
+    elements.cloudPanosTree.innerHTML = `<p class="muted">Cloud data unavailable: ${escapeHtml(state.cloudPanosError)}</p>`;
+    return;
+  }
+  const weeks = cloudPanoGroups();
+  if (!weeks.length) {
+    elements.cloudPanosTree.innerHTML = `<p class="muted">No cloud panos yet. Panos exported from any computer with shared naming on will appear here.</p>`;
+    return;
+  }
+  const total = state.cloudPanos.length;
+  const collapsed = state.collapsedProcessedGroups;
+  const html = weeks.map((week) => {
+    const wOpen = !collapsed.has(week.key);
+    const wCount = week.dateList.reduce((n, d) => n + d.panos.length, 0);
+    let block = `
+      <div class="cloud-week">
+        <button class="cloud-node cloud-week-toggle" type="button" data-group-key="${week.key}">
+          <span>${wOpen ? "▾" : "▸"}</span><strong>${escapeHtml(week.label)}</strong>
+          <span class="cloud-count">${wCount}</span>
+        </button>`;
+    if (wOpen) {
+      block += week.dateList.map((date) => {
+        const dOpen = !collapsed.has(date.key);
+        let dblock = `
+          <div class="cloud-date">
+            <button class="cloud-node cloud-date-toggle" type="button" data-group-key="${date.key}">
+              <span>${dOpen ? "▾" : "▸"}</span>${escapeHtml(date.label)}
+              <span class="cloud-count">${date.panos.length}</span>
+            </button>`;
+        if (dOpen) {
+          dblock += `<ul class="cloud-name-list">` + date.panos.map((pano) => `
+            <li class="cloud-name-row">
+              <span class="mono">${escapeHtml(pano.final_name)}</span>
+              <span class="badge cloud-badge">${pano.is_own ? "This PC" : escapeHtml(pano.computer_name || "Cloud")}</span>
+            </li>`).join("") + `</ul>`;
+        }
+        return dblock + `</div>`;
+      }).join("");
+    }
+    return block + `</div>`;
+  }).join("");
+  elements.cloudPanosTree.innerHTML = html;
+  if (elements.cloudPanosMeta) {
+    elements.cloudPanosMeta.textContent = `${total} pano${total === 1 ? "" : "s"} across the organization`;
+  }
 }
 
 function archiveSelectedPhotos() {
@@ -1956,6 +2095,15 @@ function boundsFromMapData() {
       candidates.push([photo.projected_x, photo.projected_y, photo.projected_x, photo.projected_y]);
     }
   }
+  // Cloud panos can be the only geometry on a fresh machine — let them boot and
+  // fit the map even with no local areas/photos yet.
+  if (state.showCloudPanos) {
+    for (const pano of state.cloudPanos) {
+      if (pano.projected_x != null && pano.projected_y != null) {
+        candidates.push([pano.projected_x, pano.projected_y, pano.projected_x, pano.projected_y]);
+      }
+    }
+  }
   if (!candidates.length) return null;
   return [
     Math.min(...candidates.map((item) => item[0])),
@@ -2245,6 +2393,7 @@ function ensureLeafletMap() {
     drawLayer: L.layerGroup().addTo(map),
     areaEditLayer: L.layerGroup().addTo(map),
     areaEditPolys: [],
+    cloudLayer: L.layerGroup().addTo(map),
     markers: {},
     dataKey: null,
     fitted: false,
@@ -2264,6 +2413,8 @@ function leafletDataKey() {
     state.mapDateFilter.days,
     state.mapDateFilter.from,
     state.mapDateFilter.to,
+    state.showCloudPanos,
+    state.cloudPanosVersion,
   ].join("|");
 }
 
@@ -2450,6 +2601,39 @@ function syncLeafletLayers(leaf) {
     marker.on("mouseout", () => setMapHover(null));
     marker.addTo(leaf.photoLayer);
     leaf.markers[photo.id] = { marker, photo };
+  }
+
+  syncCloudLayer(leaf);
+}
+
+// Cloud panos: the org's exported panos from every computer (no image data),
+// plotted at their real GPS (projected server-side). Purple so they read
+// distinctly from local processed (blue); hollow when they came from another
+// machine, solid for this computer's own exports.
+function cloudMarkerStyle(pano) {
+  return {
+    radius: 5,
+    fillColor: pano.is_own ? "#9b7fd4" : "#241b3a",
+    fillOpacity: pano.is_own ? 0.95 : 0.25,
+    color: "#b79cf0",
+    weight: pano.is_own ? 1.5 : 2,
+    dashArray: pano.is_own ? null : "3 3",
+  };
+}
+
+function syncCloudLayer(leaf) {
+  leaf.cloudLayer.clearLayers();
+  if (!state.showCloudPanos) return;
+  for (const pano of state.cloudPanos) {
+    if (pano.projected_x == null || pano.projected_y == null) continue;
+    const marker = L.circleMarker([pano.projected_y, pano.projected_x], cloudMarkerStyle(pano));
+    const who = pano.computer_name ? ` · ${escapeHtml(pano.computer_name)}` : "";
+    marker.bindTooltip(`${escapeHtml(pano.final_name)}${who}`, {
+      direction: "right",
+      offset: [8, 0],
+      className: "map-cloud-tooltip",
+    });
+    marker.addTo(leaf.cloudLayer);
   }
 }
 
@@ -4021,6 +4205,26 @@ function handleMapVisibilityChange() {
   renderMap();
 }
 
+function handleCloudVisibilityChange() {
+  state.showCloudPanos = elements.mapShowCloudToggle.checked;
+  // Update the cloud layer directly so toggling off clears it even when there
+  // is no local geometry (renderMap early-returns on "no bounds" in that case).
+  if (state.leaflet) syncCloudLayer(state.leaflet);
+  renderMap();
+}
+
+function handleCloudTreeClick(event) {
+  const toggle = event.target.closest("[data-group-key]");
+  if (!toggle) return;
+  const key = toggle.dataset.groupKey;
+  if (state.collapsedProcessedGroups.has(key)) {
+    state.collapsedProcessedGroups.delete(key);
+  } else {
+    state.collapsedProcessedGroups.add(key);
+  }
+  renderCloudPanos();
+}
+
 function handleMapDateFilterChange() {
   state.mapDateFilter.enabled = elements.mapRecentToggle.checked;
   state.mapDateFilter.from = elements.mapDateFrom.value || "";
@@ -4509,6 +4713,17 @@ elements.mapLabelsToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapOriginalLabelToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapProposedLabelToggle.addEventListener("change", handleMapLabelToggleChange);
 elements.mapShowProcessedToggle.addEventListener("change", handleMapVisibilityChange);
+if (elements.mapShowCloudToggle) {
+  elements.mapShowCloudToggle.addEventListener("change", handleCloudVisibilityChange);
+}
+if (elements.cloudPanosTree) {
+  elements.cloudPanosTree.addEventListener("click", handleCloudTreeClick);
+}
+if (elements.cloudRefreshButton) {
+  elements.cloudRefreshButton.addEventListener("click", () => {
+    loadCloudPanos().catch((error) => setStatus(error.message, true));
+  });
+}
 elements.mapRecentToggle.addEventListener("change", handleMapDateFilterChange);
 elements.mapDateFrom.addEventListener("change", handleMapDateFilterChange);
 elements.mapDateTo.addEventListener("change", handleMapDateFilterChange);
