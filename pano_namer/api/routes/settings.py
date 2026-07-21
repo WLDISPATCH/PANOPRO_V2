@@ -5,9 +5,11 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 
+from pano_namer.config import FIXED_CRS
 from pano_namer.database import Database
 from pano_namer.schemas import (
     AreaSyncSummary,
+    CloudPanosResponse,
     GlobalAreaSyncRequest,
     GlobalAreaSyncSummary,
     SharedNamingBackfillResponse,
@@ -16,7 +18,7 @@ from pano_namer.schemas import (
     SharedNamingSettingsResponse,
     SharedNamingTestResponse,
 )
-from pano_namer.services import area_sync, overlay_sync, shared_naming
+from pano_namer.services import area_sync, overlay_sync, pano_registry, shared_naming
 
 _SYNC_COUNTER_KEYS = (
     "pulled_new", "pulled_updated", "pushed_new", "pushed_updated",
@@ -88,6 +90,52 @@ def register_settings_routes(app: FastAPI, db: Database, storage: StorageService
             overlay = overlay_sync.run_overlay_sync(db, storage, payload.project_id)
             _merge_overlay_counts(result, overlay)
         return result
+
+    @app.get("/api/cloud-panos", response_model=CloudPanosResponse)
+    def get_cloud_panos() -> dict[str, Any]:
+        """Org-wide list of exported panos (name + projected location) for the
+        cloud-data display. Passive: returns {ok:false} rather than erroring
+        when Supabase is offline or shared naming is not configured."""
+        with db.connect() as conn:
+            settings = shared_naming.load_settings(conn)
+        if not settings.is_configured():
+            return {
+                "ok": False,
+                "connected": False,
+                "panos": [],
+                "error": "Supabase URL and anon key are required.",
+            }
+        try:
+            rows = pano_registry.fetch_exported_panos(settings)
+        except SharedNamingError as exc:
+            return {"ok": False, "connected": False, "panos": [], "error": str(exc)}
+
+        from pyproj import Transformer
+
+        transformer = Transformer.from_crs("EPSG:4326", FIXED_CRS, always_xy=True)
+        own = settings.resolved_computer_name()
+        panos: list[dict[str, Any]] = []
+        for row in rows:
+            # Skip this computer's own exports — they already live in the local
+            # Completed list, so the cloud view shows only what other machines
+            # shot. computer_name is the discriminator.
+            if own and row.get("computer_name") == own:
+                continue
+            lat, lon = row.get("gps_lat"), row.get("gps_lon")
+            projected_x = projected_y = None
+            if lat is not None and lon is not None:
+                projected_x, projected_y = transformer.transform(lon, lat)
+            panos.append(
+                {
+                    "final_name": row.get("final_name"),
+                    "computer_name": row.get("computer_name"),
+                    "capture_ts": row.get("capture_ts"),
+                    "projected_x": projected_x,
+                    "projected_y": projected_y,
+                    "is_own": False,
+                }
+            )
+        return {"ok": True, "connected": True, "panos": panos, "error": None}
 
     @app.post(
         "/api/settings/shared-naming/test", response_model=SharedNamingTestResponse
