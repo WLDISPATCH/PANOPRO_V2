@@ -837,13 +837,12 @@ button.secondary,
   overflow: hidden;
 }
 
-.viewer-shell:fullscreen {
+/* PSV fullscreens its mount point (#viewer-360), so the :fullscreen rules must
+   target that element, not the wrapping shell. */
+.viewer-360:fullscreen {
   border-radius: 0;
   border: 0;
   background: #000;
-}
-
-.viewer-shell:fullscreen .viewer-360 {
   min-height: 100vh;
 }
 

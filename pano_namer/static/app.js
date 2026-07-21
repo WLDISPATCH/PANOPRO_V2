@@ -4200,7 +4200,9 @@ function handleCollectionsClick(event) {
 
 function toggleViewerFullscreen() {
   const handle = state.viewer360.viewer;
-  if (handle) handle.enterFullscreen();
+  if (!handle) return;
+  if (handle.toggleFullscreen) handle.toggleFullscreen();
+  else handle.enterFullscreen();
 }
 
 function handleDocumentClick(event) {
