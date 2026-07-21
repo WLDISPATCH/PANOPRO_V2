@@ -112,9 +112,25 @@ def _append_recent_windows_faults(handle) -> None:
 _RENDER_STATE_FILE = Path.home() / ".pano_namer_render_state.json"
 
 
-# Fall back to software once this many GPU crashes are seen within the window.
+# Step down a render tier once this many crashes are seen within the window.
 _CRASH_FALLBACK_THRESHOLD = 3
 _CRASH_WINDOW_DAYS = 30
+
+# Render tiers, most to least hardware-accelerated. Escalation walks this list:
+#   gpu       - full hardware acceleration incl. Direct Composition (default).
+#   gpu_safe  - GPU + WebGL still on, but Direct Composition disabled. Targets
+#               the Qt6WebEngineCore "SharedImage ... Scanout / Context lost"
+#               crash (issues #21/#26/#39/#42) without killing the 360 viewer.
+#   software  - GPU off entirely; stable on broken drivers, no WebGL viewer.
+_RENDER_TIERS = ("gpu", "gpu_safe", "software")
+
+
+def _next_render_tier(tier: str) -> str:
+    try:
+        index = _RENDER_TIERS.index(tier)
+    except ValueError:
+        return "gpu_safe"
+    return _RENDER_TIERS[min(index + 1, len(_RENDER_TIERS) - 1)]
 
 
 def _now_iso() -> str:
@@ -148,39 +164,57 @@ def _recent_crashes(timestamps: list, now_iso: str) -> list:
 def resolve_render_mode(
     state_file: Path = _RENDER_STATE_FILE, now_iso: str | None = None
 ) -> str:
-    """Decide 'gpu' or 'software' rendering, with crash auto-fallback.
+    """Decide the render tier ('gpu' / 'gpu_safe' / 'software'), self-healing.
 
     Machines vary: a healthy GPU runs great with hardware acceleration (and the
-    WebGL 360 viewer), but on some field machines (issues #21/#26/#39) the GPU
-    driver faults inside Qt6WebEngineCore.dll and the app crashes. No single
-    static default fits both, and SwiftShader (the 2.7.6 attempt) turned out to
-    crash healthy machines too (Qt/Chromium shared-image mismatch).
+    WebGL 360 viewer), but on some field machines (issues #21/#26/#39/#42) the
+    GPU faults inside Qt6WebEngineCore.dll and the app crashes. The crash log
+    (issue #39) shows it is specifically the Direct Composition scanout /
+    shared-image path, not WebGL itself — so before giving up the viewer we try
+    an intermediate ``gpu_safe`` tier that keeps the GPU and WebGL but disables
+    Direct Composition. SwiftShader (the 2.7.6 attempt) is deliberately not a
+    tier: it crashed healthy machines too (Qt/Chromium shared-image mismatch).
 
-    So we default to the GPU and self-heal. Each launch writes a "running"
-    sentinel (its start time) that a clean exit removes. A later launch that
-    still finds the sentinel knows the previous run never exited cleanly and
-    records a crash timestamp. Once there are ``_CRASH_FALLBACK_THRESHOLD``
-    crashes within the last ``_CRASH_WINDOW_DAYS`` days, we permanently fall
-    back to software for this machine.
+    So we default to full GPU and step *down one tier at a time*. Each launch
+    writes a "running" sentinel (its start time) that a clean exit removes. A
+    later launch that still finds the sentinel knows the previous run never
+    exited cleanly and records a crash timestamp. Once there are
+    ``_CRASH_FALLBACK_THRESHOLD`` crashes within the last ``_CRASH_WINDOW_DAYS``
+    days at the current tier, we drop to the next tier and reset the window, so
+    a machine only falls to software if gpu_safe also keeps crashing.
 
     The crash history is *rolling*, not consecutive: a clean session between
-    crashes no longer resets the count. (The old "two consecutive" rule never
+    crashes no longer resets the count (the old "two consecutive" rule never
     fired in the field — FH-UAV-II crashes mid-session, gets relaunched and
-    used fine, then crashes again, and the clean run in between wiped the
-    counter every time, issue re-reported 2026-07-15.)
+    used fine, then crashes again; the clean run in between wiped the counter,
+    re-reported 2026-07-15).
 
-    Overrides: PANOPRO_FORCE_GPU=1 pins the GPU (and clears a past fallback and
-    crash history); PANOPRO_DISABLE_GPU=1 pins software.
+    Overrides: PANOPRO_FORCE_GPU=1 pins full GPU (and clears any past fallback
+    and crash history); PANOPRO_DISABLE_GPU=1 pins software;
+    PANOPRO_RENDER_MODE=gpu|gpu_safe|software pins a specific tier (used to test
+    gpu_safe on a machine that has already fallen back).
     """
     now_iso = now_iso or _now_iso()
     if os.environ.get("PANOPRO_FORCE_GPU") == "1":
-        _write_render_state(state_file, {"running": now_iso, "crashes": []})
+        _write_render_state(state_file, {"tier": "gpu", "running": now_iso, "crashes": []})
         return "gpu"
     if os.environ.get("PANOPRO_DISABLE_GPU") == "1":
         return "software"
+    pinned = os.environ.get("PANOPRO_RENDER_MODE")
+    if pinned in _RENDER_TIERS:
+        if pinned != "software":
+            _write_render_state(state_file, {"tier": pinned, "running": now_iso, "crashes": []})
+        return pinned
 
     state = _read_render_state(state_file)
+    # Legacy hard software pin written by 2.8.x before tiers existed.
     if state.get("mode") == "software":
+        return "software"
+
+    tier = state.get("tier")
+    if tier not in _RENDER_TIERS:
+        tier = "gpu"
+    if tier == "software":
         return "software"
 
     raw = state.get("crashes")
@@ -193,10 +227,13 @@ def resolve_render_mode(
     crashes = _recent_crashes(crashes, now_iso)
 
     if len(crashes) >= _CRASH_FALLBACK_THRESHOLD:
-        _write_render_state(state_file, {"mode": "software", "crashes": crashes})
-        return "software"
-    _write_render_state(state_file, {"running": now_iso, "crashes": crashes})
-    return "gpu"
+        tier = _next_render_tier(tier)
+        crashes = []  # fresh window for the new tier
+        if tier == "software":
+            _write_render_state(state_file, {"tier": "software", "crashes": []})
+            return "software"
+    _write_render_state(state_file, {"tier": tier, "running": now_iso, "crashes": crashes})
+    return tier
 
 
 def mark_render_clean_exit(state_file: Path = _RENDER_STATE_FILE) -> None:
@@ -206,7 +243,7 @@ def mark_render_clean_exit(state_file: Path = _RENDER_STATE_FILE) -> None:
     version did) is exactly what stopped the auto-fallback from ever firing.
     """
     state = _read_render_state(state_file)
-    if state.get("mode") == "software":
+    if state.get("mode") == "software" or state.get("tier") == "software":
         return
     state.pop("running", None)
     _write_render_state(state_file, state)
@@ -229,16 +266,21 @@ def _write_render_state(state_file: Path, data: dict) -> None:
 def configure_webengine(mode: str) -> str:
     """Apply Chromium flags for the chosen render mode before QtWebEngine init.
 
-    'gpu' keeps hardware acceleration (relaxed sandbox) so the WebGL 360 viewer
-    works. 'software' disables the GPU entirely — verified stable on a broken
-    driver; the 360 viewer's WebGL is unavailable in this mode, but the app no
-    longer crashes. PANOPRO_CHROMIUM_FLAGS overrides the string entirely.
+    'gpu' keeps full hardware acceleration (relaxed sandbox) so the WebGL 360
+    viewer works. 'gpu_safe' keeps the GPU and WebGL but adds
+    --disable-direct-composition, dropping only the scanout/overlay presentation
+    path that faults on the field drivers (issue #39) — the viewer still works.
+    'software' disables the GPU entirely — verified stable on a broken driver;
+    the 360 viewer's WebGL is unavailable in this mode, but the app no longer
+    crashes. PANOPRO_CHROMIUM_FLAGS overrides the string entirely.
 
     Chromium reads QTWEBENGINE_CHROMIUM_FLAGS during QtWebEngine init, so this
     must run before QApplication is constructed. Returns the applied flags.
     """
     if mode == "software":
         default_flags = "--disable-gpu-sandbox --no-sandbox --disable-gpu --disable-gpu-compositing"
+    elif mode == "gpu_safe":
+        default_flags = "--disable-gpu-sandbox --no-sandbox --disable-direct-composition"
     else:
         default_flags = "--disable-gpu-sandbox --no-sandbox"
     flags = os.environ.get("PANOPRO_CHROMIUM_FLAGS", default_flags)
