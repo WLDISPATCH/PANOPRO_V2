@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/static/vendor/psv/core/index.css">
   <link rel="stylesheet" href="/static/vendor/psv/markers/index.css">
   <link rel="stylesheet" href="/static/vendor/psv/compass/index.css">
-  <link rel="stylesheet" href="/static/styles.css?v=2.8.2">
+  <link rel="stylesheet" href="/static/styles.css?v=2.9.0">
   <script type="importmap">
   {
     "imports": {
@@ -237,6 +237,10 @@
                 <span>Show Processed Panos</span>
               </label>
               <label class="toggle-chip">
+                <input id="map-show-cloud-toggle" type="checkbox">
+                <span>Show Cloud Panos</span>
+              </label>
+              <label class="toggle-chip">
                 <input id="map-labels-toggle" type="checkbox">
                 <span>Labels</span>
               </label>
@@ -287,6 +291,7 @@
                 <span><i class="legend-swatch area"></i>Area footprint</span>
                 <span><i class="legend-dot pending"></i>Pending pano</span>
                 <span><i class="legend-dot processed"></i>Processed pano</span>
+                <span><i class="legend-dot cloud"></i>Cloud pano</span>
                 <span><i class="legend-dot nearest"></i>Nearest/manual</span>
                 <span><i class="legend-dot error"></i>Error</span>
                 <span><i class="legend-ring"></i>Selected</span>
@@ -382,6 +387,17 @@
             </thead>
             <tbody id="processed-table"></tbody>
           </table>
+        </div>
+
+        <div class="cloud-section">
+          <div class="cloud-section-head">
+            <div>
+              <p class="eyebrow">Organization (Cloud)</p>
+              <p id="cloud-panos-meta" class="muted">Exported panos from every computer — names and locations only.</p>
+            </div>
+            <button id="cloud-refresh-button" class="secondary" type="button">Refresh cloud data</button>
+          </div>
+          <div id="cloud-panos-tree" class="cloud-tree"></div>
         </div>
       </section>
 
@@ -691,7 +707,7 @@
 
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <script src="/static/vendor/leaflet/leaflet.js"></script>
-  <script type="module" src="/static/viewer360.js?v=2.8.2"></script>
-  <script src="/static/app.js?v=2.8.2"></script>
+  <script type="module" src="/static/viewer360.js?v=2.9.0"></script>
+  <script src="/static/app.js?v=2.9.0"></script>
 </body>
 </html>

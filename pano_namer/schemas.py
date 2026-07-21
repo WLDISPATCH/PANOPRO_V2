@@ -90,6 +90,22 @@ class GlobalAreaSyncSummary(BaseModel):
         return self.pulled_new + self.pulled_updated + self.deactivated
 
 
+class CloudPanoItem(BaseModel):
+    final_name: str
+    computer_name: str | None = None
+    capture_ts: str | None = None
+    projected_x: float | None = None
+    projected_y: float | None = None
+    is_own: bool = False
+
+
+class CloudPanosResponse(BaseModel):
+    ok: bool
+    connected: bool = False
+    panos: list[CloudPanoItem] = Field(default_factory=list)
+    error: str | None = None
+
+
 class SharedNamingTestResponse(BaseModel):
     ok: bool
     error: str | None = None

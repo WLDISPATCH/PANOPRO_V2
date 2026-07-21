@@ -95,6 +95,48 @@ def fetch_registry_rows(
     return rows
 
 
+def fetch_exported_panos(
+    settings: SharedNamingSettings, limit: int = 5000
+) -> list[dict[str, Any]]:
+    """Fetch every exported pano in the shared registry (org-wide).
+
+    Powers the cloud-data display: names + real GPS of what the whole team has
+    shot, from any computer. Only rows that were actually named/exported
+    (final_name present) and flagged as panoramas are returned. Paginates so a
+    large org isn't silently truncated by PostgREST's default row cap.
+    """
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        status, body = _request(
+            "GET",
+            _registry_url(
+                settings,
+                {
+                    "final_name": "not.is.null",
+                    "is_panorama": "eq.true",
+                    "select": "final_name,computer_name,capture_ts,gps_lat,gps_lon,created_at",
+                    "order": "capture_ts.desc.nullslast",
+                    "limit": str(_QUERY_CHUNK_SIZE),
+                    "offset": str(offset),
+                },
+            ),
+            _headers(settings),
+            None,
+        )
+        if status != 200:
+            raise SharedNamingUnavailableError(
+                f"Supabase registry lookup failed with HTTP {status}. "
+                f"{REGISTRY_OFFLINE_MESSAGE}"
+            )
+        page = json.loads(body or b"[]")
+        rows.extend(page)
+        if len(page) < _QUERY_CHUNK_SIZE or len(rows) >= limit:
+            break
+        offset += _QUERY_CHUNK_SIZE
+    return rows[:limit]
+
+
 def is_registered_duplicate(
     registry_rows: list[dict[str, Any]],
     original_name: str,
