@@ -79,7 +79,7 @@ class CloudPanosRouteTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_projects_coords_and_flags_own(self) -> None:
+    def test_excludes_own_and_projects_others(self) -> None:
         rows = [
             {"final_name": "260702_OPTA_001", "computer_name": "THIS-PC",
              "gps_lat": 57.0, "gps_lon": -111.0, "capture_ts": "2026-07-02T10:00:00"},
@@ -92,15 +92,16 @@ class CloudPanosRouteTests(unittest.TestCase):
             result = self.endpoint()
         self.assertTrue(result["ok"])
         self.assertTrue(result["connected"])
-        self.assertEqual(len(result["panos"]), 3)
+        # THIS-PC's own export is dropped; only the two OTHER-PC rows remain.
+        self.assertEqual(len(result["panos"]), 2)
+        self.assertTrue(all(p["computer_name"] == "OTHER-PC" for p in result["panos"]))
+        self.assertTrue(all(not p["is_own"] for p in result["panos"]))
         first = result["panos"][0]
         # EPSG:26912 easting/northing for ~57N,-111W is ~500k / ~6.3M metres.
         self.assertAlmostEqual(first["projected_x"], 500000, delta=5000)
         self.assertGreater(first["projected_y"], 6_000_000)
-        self.assertTrue(first["is_own"])
-        self.assertFalse(result["panos"][1]["is_own"])
         # Row with no GPS still listed, but with null projected coords.
-        self.assertIsNone(result["panos"][2]["projected_x"])
+        self.assertIsNone(result["panos"][1]["projected_x"])
 
     def test_offline_returns_not_ok_without_raising(self) -> None:
         with patch.object(

@@ -405,6 +405,7 @@ def main() -> int:
     from PySide6.QtCore import QObject, Qt, QUrl, Signal, Slot
     from PySide6.QtWebChannel import QWebChannel
     from PySide6.QtGui import QDesktopServices
+    from PySide6.QtWebEngineCore import QWebEngineSettings
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -510,6 +511,25 @@ def main() -> int:
     bridge = DesktopBridge()
     channel.registerObject("desktopBridge", bridge)
     view.page().setWebChannel(channel)
+
+    # HTML5 Fullscreen API support. QtWebEngine ignores element.requestFullscreen()
+    # unless the setting is enabled AND the page's fullScreenRequested signal is
+    # accepted, so the 360 viewer's "Full Screen" button did nothing in the
+    # desktop app (it worked in a plain browser). Accept the request and drive
+    # the window in/out of fullscreen to match. toggleOn() is true when entering.
+    view.page().settings().setAttribute(
+        QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True
+    )
+
+    def _handle_fullscreen_request(request) -> None:
+        request.accept()
+        if request.toggleOn():
+            view.showFullScreen()
+        else:
+            view.showNormal()
+
+    view.page().fullScreenRequested.connect(_handle_fullscreen_request)
+
     view.setWindowTitle(f"PANO PRO v{__version__}")
     view.resize(1440, 960)
     view.load(QUrl(f"http://127.0.0.1:{port}/"))

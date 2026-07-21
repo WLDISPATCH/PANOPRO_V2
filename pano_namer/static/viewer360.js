@@ -116,6 +116,12 @@ function mount(container, options = {}) {
     enterFullscreen() {
       viewer.enterFullscreen();
     },
+    toggleFullscreen() {
+      viewer.toggleFullscreen();
+    },
+    isFullscreen() {
+      return viewer.isFullscreenEnabled();
+    },
     resize() {
       viewer.autoSize();
     },

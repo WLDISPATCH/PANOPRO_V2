@@ -837,13 +837,12 @@ button.secondary,
   overflow: hidden;
 }
 
-.viewer-shell:fullscreen {
+/* PSV fullscreens its mount point (#viewer-360), so the :fullscreen rules must
+   target that element, not the wrapping shell. */
+.viewer-360:fullscreen {
   border-radius: 0;
   border: 0;
   background: #000;
-}
-
-.viewer-shell:fullscreen .viewer-360 {
   min-height: 100vh;
 }
 
@@ -2183,29 +2182,28 @@ button:disabled:hover {
 .legend-dot.error { background: #cf4f4f; }
 .legend-dot.cloud { background: #9b7fd4; }
 
-/* ===== Cloud data (issue #54): org-wide exported panos ===== */
-.cloud-section {
-  margin-top: 16px;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+/* ===== Completed tree (issue #54): Week -> Day -> Local / Cloud ===== */
+.completed-meta {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
 }
 
-.cloud-section-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-
-.cloud-tree {
+.completed-tree {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  max-height: min(64vh, 680px);
+  overflow-y: auto;
+  padding: 4px 6px 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
 }
 
-.cloud-node {
+.completed-tree .ctree-day { margin-left: 18px; }
+.completed-tree .ctree-sub { margin-left: 34px; }
+
+.ctree-node {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2220,48 +2218,73 @@ button:disabled:hover {
   font: inherit;
 }
 
-.cloud-node:hover {
-  background: rgba(155, 127, 212, 0.12);
+.ctree-node:hover { background: rgba(29, 53, 87, 0.08); }
+
+.ctree-caret {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--muted);
 }
 
-.cloud-week-toggle strong {
+.ctree-week-node strong {
   font-family: var(--font-display);
   letter-spacing: 0.02em;
 }
 
-.cloud-date {
-  margin-left: 16px;
-}
-
-.cloud-date-toggle {
+.ctree-day-node .ctree-day-label {
   color: var(--muted);
   font-size: 0.9rem;
+  font-family: var(--font-mono, monospace);
 }
 
-.cloud-count {
+.ctree-sub-node .ctree-sub-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ctree-sub-local .ctree-sub-label { color: #1d3557; }
+.ctree-sub-cloud .ctree-sub-label { color: #6c4fb0; }
+
+.ctree-counts {
   margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.ctree-count {
   color: var(--muted);
-  font-size: 0.78rem;
-  background: rgba(155, 127, 212, 0.16);
+  font-size: 0.74rem;
   border-radius: 999px;
   padding: 1px 9px;
+  white-space: nowrap;
 }
+.ctree-count.local { background: rgba(29, 53, 87, 0.14); color: #1d3557; }
+.ctree-count.cloud { background: rgba(155, 127, 212, 0.16); color: #6c4fb0; }
+.ctree-node > .ctree-count { margin-left: auto; }
 
-.cloud-name-list {
+.ctree-list {
   list-style: none;
-  margin: 2px 0 6px 34px;
+  margin: 1px 0 5px 20px;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
-.cloud-name-row {
+.ctree-row {
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 0.86rem;
+  padding: 3px 6px;
+  border-radius: 6px;
 }
+.ctree-row.local { cursor: pointer; }
+.ctree-row.local:hover { background: rgba(29, 53, 87, 0.08); }
+.ctree-row.is-selected { background: rgba(29, 53, 87, 0.16); }
+.ctree-row .ctree-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctree-row .ctree-area { color: var(--muted); font-size: 0.78rem; flex: 0 0 auto; }
 
 .badge.cloud-badge {
   background: rgba(155, 127, 212, 0.2);
