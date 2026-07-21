@@ -83,14 +83,32 @@ def test_render_mode_falls_back_on_crashes_with_clean_runs_between(render_state,
     # never fired because the clean run wiped the counter each time.
     monkeypatch.delenv("PANOPRO_FORCE_GPU", raising=False)
     monkeypatch.delenv("PANOPRO_DISABLE_GPU", raising=False)
+    monkeypatch.delenv("PANOPRO_RENDER_MODE", raising=False)
     _crash_launch(render_state, "2026-07-11T13:21:50+00:00")   # crash 1
     assert _clean_launch(render_state, "2026-07-11T13:25:34+00:00") == "gpu"
     _crash_launch(render_state, "2026-07-13T14:36:48+00:00")   # crash 2
     assert _clean_launch(render_state, "2026-07-13T15:05:13+00:00") == "gpu"
     _crash_launch(render_state, "2026-07-15T05:33:36+00:00")   # crash 3
-    # The launch after the 3rd crash falls back and stays there.
-    assert resolve_render_mode(render_state, now_iso="2026-07-15T06:00:00+00:00") == "software"
-    assert resolve_render_mode(render_state, now_iso="2026-07-15T07:00:00+00:00") == "software"
+    # The launch after the 3rd GPU crash steps down to gpu_safe (keeps the
+    # viewer) rather than all the way to software.
+    assert resolve_render_mode(render_state, now_iso="2026-07-15T06:00:00+00:00") == "gpu_safe"
+    assert _clean_launch(render_state, "2026-07-15T06:30:00+00:00") == "gpu_safe"
+
+
+def test_render_mode_steps_down_to_software_only_after_gpu_safe_also_crashes(render_state, monkeypatch):
+    monkeypatch.delenv("PANOPRO_FORCE_GPU", raising=False)
+    monkeypatch.delenv("PANOPRO_DISABLE_GPU", raising=False)
+    monkeypatch.delenv("PANOPRO_RENDER_MODE", raising=False)
+    # Three GPU crashes -> gpu_safe.
+    _crash_launch(render_state, "2026-07-11T00:00:00+00:00")
+    _crash_launch(render_state, "2026-07-12T00:00:00+00:00")
+    _crash_launch(render_state, "2026-07-13T00:00:00+00:00")
+    assert _crash_launch(render_state, "2026-07-13T01:00:00+00:00") == "gpu_safe"
+    # Three more crashes, now in gpu_safe -> software, and it stays there.
+    _crash_launch(render_state, "2026-07-14T00:00:00+00:00")
+    _crash_launch(render_state, "2026-07-15T00:00:00+00:00")
+    assert resolve_render_mode(render_state, now_iso="2026-07-16T00:00:00+00:00") == "software"
+    assert resolve_render_mode(render_state, now_iso="2026-07-17T00:00:00+00:00") == "software"
 
 
 def test_render_mode_prunes_crashes_outside_window(render_state, monkeypatch):
@@ -140,4 +158,19 @@ def test_configure_webengine_flags_per_mode(monkeypatch):
     monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
     assert configure_webengine("gpu") == "--disable-gpu-sandbox --no-sandbox"
     monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    gpu_safe = configure_webengine("gpu_safe")
+    # gpu_safe keeps the GPU (WebGL viewer) but drops only Direct Composition.
+    assert "--disable-direct-composition" in gpu_safe
+    assert "--disable-gpu " not in f"{gpu_safe} " and not gpu_safe.endswith("--disable-gpu")
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
     assert "--disable-gpu" in configure_webengine("software")
+
+
+def test_render_mode_pin_override_selects_tier(render_state, monkeypatch):
+    # PANOPRO_RENDER_MODE pins a tier even past a prior software fallback, so a
+    # machine that already fell back can be told to try gpu_safe.
+    render_state.write_text('{"tier": "software"}', encoding="utf-8")
+    monkeypatch.delenv("PANOPRO_FORCE_GPU", raising=False)
+    monkeypatch.delenv("PANOPRO_DISABLE_GPU", raising=False)
+    monkeypatch.setenv("PANOPRO_RENDER_MODE", "gpu_safe")
+    assert resolve_render_mode(render_state) == "gpu_safe"
