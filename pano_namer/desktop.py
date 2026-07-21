@@ -116,13 +116,22 @@ _RENDER_STATE_FILE = Path.home() / ".pano_namer_render_state.json"
 _CRASH_FALLBACK_THRESHOLD = 3
 _CRASH_WINDOW_DAYS = 30
 
-# Render tiers, most to least hardware-accelerated. Escalation walks this list:
-#   gpu       - full hardware acceleration incl. Direct Composition (default).
-#   gpu_safe  - GPU + WebGL still on, but Direct Composition disabled. Targets
-#               the Qt6WebEngineCore "SharedImage ... Scanout / Context lost"
-#               crash (issues #21/#26/#39/#42) without killing the 360 viewer.
+# Render tiers, most to least hardware-accelerated:
+#   gpu       - full hardware acceleration incl. GPU compositing. Crashes the
+#               field machines, so it is now opt-in via PANOPRO_FORCE_GPU only.
+#   gpu_safe  - DEFAULT. GPU + WebGL still hardware-accelerated, but GPU
+#               compositing is disabled so the browser presents the final frame
+#               on the CPU. This removes the "Scanout" shared-image path that
+#               faults inside Qt6WebEngineCore (issues #21/#26/#39/#42/#53) while
+#               keeping the 360 viewer. Reproduced and then prevented on real
+#               hardware: --disable-gpu-compositing stops the SharedImage crash
+#               and WebGL stays on the GPU. --disable-direct-composition alone
+#               (the first attempt) was insufficient on FH-UAV-II.
 #   software  - GPU off entirely; stable on broken drivers, no WebGL viewer.
 _RENDER_TIERS = ("gpu", "gpu_safe", "software")
+
+# Tiers the auto crash-fallback is allowed to pick. Full "gpu" is opt-in only.
+_AUTO_RENDER_TIERS = ("gpu_safe", "software")
 
 
 def _next_render_tier(tier: str) -> str:
@@ -166,33 +175,27 @@ def resolve_render_mode(
 ) -> str:
     """Decide the render tier ('gpu' / 'gpu_safe' / 'software'), self-healing.
 
-    Machines vary: a healthy GPU runs great with hardware acceleration (and the
-    WebGL 360 viewer), but on some field machines (issues #21/#26/#39/#42) the
-    GPU faults inside Qt6WebEngineCore.dll and the app crashes. The crash log
-    (issue #39) shows it is specifically the Direct Composition scanout /
-    shared-image path, not WebGL itself — so before giving up the viewer we try
-    an intermediate ``gpu_safe`` tier that keeps the GPU and WebGL but disables
-    Direct Composition. SwiftShader (the 2.7.6 attempt) is deliberately not a
-    tier: it crashed healthy machines too (Qt/Chromium shared-image mismatch).
+    The default is ``gpu_safe``: GPU + WebGL stay hardware-accelerated but GPU
+    compositing is disabled, so Chromium never allocates the "Scanout"
+    shared-image that faults inside Qt6WebEngineCore.dll on the field machines
+    (issues #21/#26/#39/#42/#53). This was reproduced and then prevented on real
+    hardware, and confirmed stable on FH-UAV-II under load, so every machine
+    gets it from launch #1 — no one has to crash first. Full ``gpu`` (with GPU
+    compositing) is opt-in via PANOPRO_FORCE_GPU for anyone who wants it.
 
-    So we default to full GPU and step *down one tier at a time*. Each launch
-    writes a "running" sentinel (its start time) that a clean exit removes. A
-    later launch that still finds the sentinel knows the previous run never
-    exited cleanly and records a crash timestamp. Once there are
-    ``_CRASH_FALLBACK_THRESHOLD`` crashes within the last ``_CRASH_WINDOW_DAYS``
-    days at the current tier, we drop to the next tier and reset the window, so
-    a machine only falls to software if gpu_safe also keeps crashing.
-
-    The crash history is *rolling*, not consecutive: a clean session between
-    crashes no longer resets the count (the old "two consecutive" rule never
-    fired in the field — FH-UAV-II crashes mid-session, gets relaunched and
-    used fine, then crashes again; the clean run in between wiped the counter,
-    re-reported 2026-07-15).
+    If ``gpu_safe`` itself keeps crashing, the auto-fallback drops to
+    ``software`` (GPU off, no WebGL viewer, but rock-solid). Each launch writes a
+    "running" sentinel (its start time) that a clean exit removes; a later launch
+    that still finds the sentinel records a crash timestamp. Once there are
+    ``_CRASH_FALLBACK_THRESHOLD`` crashes within ``_CRASH_WINDOW_DAYS`` days, we
+    drop to software and reset the window. The crash history is *rolling*, not
+    consecutive — a clean session between crashes no longer resets the count
+    (the old "two consecutive" rule never fired in the field, re-reported
+    2026-07-15).
 
     Overrides: PANOPRO_FORCE_GPU=1 pins full GPU (and clears any past fallback
     and crash history); PANOPRO_DISABLE_GPU=1 pins software;
-    PANOPRO_RENDER_MODE=gpu|gpu_safe|software pins a specific tier (used to test
-    gpu_safe on a machine that has already fallen back).
+    PANOPRO_RENDER_MODE=gpu|gpu_safe|software pins a specific tier.
     """
     now_iso = now_iso or _now_iso()
     if os.environ.get("PANOPRO_FORCE_GPU") == "1":
@@ -211,9 +214,11 @@ def resolve_render_mode(
     if state.get("mode") == "software":
         return "software"
 
+    # Only gpu_safe/software are auto tiers now. A stored full "gpu" (the old
+    # default from <=2.8.1, or a stale value) migrates to the gpu_safe default.
     tier = state.get("tier")
-    if tier not in _RENDER_TIERS:
-        tier = "gpu"
+    if tier not in _AUTO_RENDER_TIERS:
+        tier = "gpu_safe"
     if tier == "software":
         return "software"
 
@@ -266,13 +271,15 @@ def _write_render_state(state_file: Path, data: dict) -> None:
 def configure_webengine(mode: str) -> str:
     """Apply Chromium flags for the chosen render mode before QtWebEngine init.
 
-    'gpu' keeps full hardware acceleration (relaxed sandbox) so the WebGL 360
-    viewer works. 'gpu_safe' keeps the GPU and WebGL but adds
-    --disable-direct-composition, dropping only the scanout/overlay presentation
-    path that faults on the field drivers (issue #39) — the viewer still works.
-    'software' disables the GPU entirely — verified stable on a broken driver;
-    the 360 viewer's WebGL is unavailable in this mode, but the app no longer
-    crashes. PANOPRO_CHROMIUM_FLAGS overrides the string entirely.
+    'gpu' keeps full hardware acceleration incl. GPU compositing (opt-in). The
+    default 'gpu_safe' keeps the GPU and WebGL hardware-accelerated but adds
+    --disable-gpu-compositing (browser presents on the CPU) plus
+    --disable-direct-composition, which together remove the "Scanout"
+    shared-image path that faults inside Qt6WebEngineCore (issues #39/#53) — the
+    360 viewer still works. 'software' disables the GPU entirely — verified
+    stable on a broken driver; the viewer's WebGL is unavailable in this mode,
+    but the app no longer crashes. PANOPRO_CHROMIUM_FLAGS overrides the string
+    entirely.
 
     Chromium reads QTWEBENGINE_CHROMIUM_FLAGS during QtWebEngine init, so this
     must run before QApplication is constructed. Returns the applied flags.
@@ -280,7 +287,7 @@ def configure_webengine(mode: str) -> str:
     if mode == "software":
         default_flags = "--disable-gpu-sandbox --no-sandbox --disable-gpu --disable-gpu-compositing"
     elif mode == "gpu_safe":
-        default_flags = "--disable-gpu-sandbox --no-sandbox --disable-direct-composition"
+        default_flags = "--disable-gpu-sandbox --no-sandbox --disable-gpu-compositing --disable-direct-composition"
     else:
         default_flags = "--disable-gpu-sandbox --no-sandbox"
     flags = os.environ.get("PANOPRO_CHROMIUM_FLAGS", default_flags)
