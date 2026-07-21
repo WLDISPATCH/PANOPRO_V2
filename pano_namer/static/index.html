@@ -366,39 +366,16 @@
           <div>
             <p class="eyebrow">Rename Results</p>
             <h2>Completed</h2>
-            <p>Panos renamed by a run move here so the Process queue stays clean.</p>
+            <p>Your renamed panos and the organization's exports, by week and day. Each day splits into Local (this PC) and Cloud (other computers).</p>
           </div>
           <div class="panel-actions">
             <button id="select-all-processed-button" class="secondary" type="button">Select All</button>
             <button id="remove-selected-processed-button" class="secondary" type="button">Remove Selected</button>
+            <button id="cloud-refresh-button" class="secondary" type="button">Refresh Cloud</button>
           </div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Select</th>
-                <th>File</th>
-                <th>Date</th>
-                <th>Area</th>
-                <th>Final Name</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="processed-table"></tbody>
-          </table>
-        </div>
-
-        <div class="cloud-section">
-          <div class="cloud-section-head">
-            <div>
-              <p class="eyebrow">Organization (Cloud)</p>
-              <p id="cloud-panos-meta" class="muted">Exported panos from every computer — names and locations only.</p>
-            </div>
-            <button id="cloud-refresh-button" class="secondary" type="button">Refresh cloud data</button>
-          </div>
-          <div id="cloud-panos-tree" class="cloud-tree"></div>
-        </div>
+        <p id="completed-meta" class="muted completed-meta"></p>
+        <div id="completed-tree" class="completed-tree"></div>
       </section>
 
       <!-- ================= LIBRARY (hidden from nav, kept for future use) ================= -->

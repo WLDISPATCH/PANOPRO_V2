@@ -171,9 +171,8 @@ const elements = {
   photoFileInput: document.getElementById("photo-file-input"),
   photoFolderInput: document.getElementById("photo-folder-input"),
   photosTable: document.getElementById("photos-table"),
-  processedTable: document.getElementById("processed-table"),
-  cloudPanosTree: document.getElementById("cloud-panos-tree"),
-  cloudPanosMeta: document.getElementById("cloud-panos-meta"),
+  completedTree: document.getElementById("completed-tree"),
+  completedMeta: document.getElementById("completed-meta"),
   cloudRefreshButton: document.getElementById("cloud-refresh-button"),
   mapShowCloudToggle: document.getElementById("map-show-cloud-toggle"),
   pendingCount: document.getElementById("pending-count"),
@@ -424,47 +423,6 @@ function matchBadgeForPhoto(photo) {
   if (photo.match_mode === "nearest") return badge("Nearest", "warn");
   if (!photo.matched_area_id) return badge("Unmatched", "warn");
   return badge("Inside");
-}
-
-function processedPhotoGroups() {
-  const photoToRun = new Map();
-  for (const run of state.runs) {
-    for (const result of run.results || []) {
-      if (result.status === "renamed" || result.status === "unchanged") {
-        photoToRun.set(result.photo_id, run);
-      }
-    }
-  }
-
-  const grouped = new Map();
-  for (const photo of processedPhotos()) {
-    const run = photoToRun.get(photo.id) || null;
-    const key = run ? `run-${run.id}` : `unassigned-${photo.batch_id || photo.id}`;
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        key,
-        run,
-        label: run ? fmtDate(run.started_at || run.completed_at) : `Older processed photos`,
-        photos: [],
-      });
-    }
-    grouped.get(key).photos.push(photo);
-  }
-
-  return [...grouped.values()]
-    .sort((left, right) => {
-      const leftTime = left.run ? Date.parse(left.run.started_at || left.run.completed_at || "") : 0;
-      const rightTime = right.run ? Date.parse(right.run.started_at || right.run.completed_at || "") : 0;
-      return rightTime - leftTime;
-    })
-    .map((group) => ({
-      ...group,
-      photos: group.photos.sort((left, right) => {
-        const leftTime = Date.parse(left.capture_ts || "") || 0;
-        const rightTime = Date.parse(right.capture_ts || "") || 0;
-        return leftTime - rightTime;
-      }),
-    }));
 }
 
 async function api(path, options = {}) {
@@ -1086,8 +1044,7 @@ function renderAll() {
   renderAreas();
   renderOverlayLibrary();
   renderPhotos();
-  renderProcessed();
-  renderCloudPanos();
+  renderCompleted();
   renderArchive();
   renderCollections();
   renderViewer();
@@ -1410,60 +1367,191 @@ function renderPhotos() {
   positionPendingAreaMenu();
 }
 
-function renderProcessed() {
-  const groups = processedPhotoGroups();
-  if (!state.currentProjectId) {
-    elements.processedTable.innerHTML = `<tr><td colspan="6">Create a template first.</td></tr>`;
-    return;
+// Unified Completed model: Week -> Day, and each day carries a Local list (this
+// PC's processed panos, per-template) and a Cloud list (other computers, org-wide
+// from the registry). Both are keyed off capture_ts so the same day lines up.
+function completedTree() {
+  const weeks = new Map();
+
+  function dayBucket(captureTs) {
+    const date = captureTs ? new Date(captureTs) : null;
+    const valid = date && !Number.isNaN(date.getTime());
+    const { year, week } = valid ? isoWeek(date) : { year: 0, week: 0 };
+    const weekKey = valid ? `cmp-week-${year}-W${String(week).padStart(2, "0")}` : "cmp-week-unknown";
+    const weekLabel = valid ? `${year} · Week ${String(week).padStart(2, "0")}` : "Undated";
+    const weekSort = valid ? year * 100 + week : -1;
+    const stamp = valid
+      ? `${String(year).slice(2)}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`
+      : "------";
+    const dayKey = `${weekKey}-day-${stamp}`;
+    const daySort = valid ? Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) : -1;
+    let weekEntry = weeks.get(weekKey);
+    if (!weekEntry) {
+      weekEntry = { key: weekKey, label: weekLabel, sort: weekSort, days: new Map() };
+      weeks.set(weekKey, weekEntry);
+    }
+    let dayEntry = weekEntry.days.get(dayKey);
+    if (!dayEntry) {
+      dayEntry = { key: dayKey, label: stamp, sort: daySort, local: [], cloud: [] };
+      weekEntry.days.set(dayKey, dayEntry);
+    }
+    return dayEntry;
   }
-  if (!groups.length) {
-    elements.processedTable.innerHTML = `<tr><td colspan="6">No processed photos yet.</td></tr>`;
-    return;
+
+  for (const photo of processedPhotos()) {
+    dayBucket(photo.capture_ts).local.push(photo);
   }
-  const validKeys = new Set(groups.map((group) => group.key));
+  for (const pano of state.cloudPanos) {
+    dayBucket(pano.capture_ts).cloud.push(pano);
+  }
+
+  const weekList = [...weeks.values()].sort((a, b) => b.sort - a.sort);
+  for (const w of weekList) {
+    w.dayList = [...w.days.values()].sort((a, b) => b.sort - a.sort);
+    w.localCount = 0;
+    w.cloudCount = 0;
+    for (const day of w.dayList) {
+      day.local.sort((a, b) => (a.proposed_filename || "").localeCompare(b.proposed_filename || ""));
+      day.cloud.sort((a, b) => (a.final_name || "").localeCompare(b.final_name || ""));
+      w.localCount += day.local.length;
+      w.cloudCount += day.cloud.length;
+    }
+  }
+  return weekList;
+}
+
+function renderCompleted() {
+  if (!elements.completedTree) return;
+  const weeks = completedTree();
+  const localTotal = processedPhotos().length;
+  const cloudTotal = state.cloudPanos.length;
+
+  // Collect every collapse key and prune stale ones. New keys start collapsed
+  // except the newest week + its newest day + that day's Local/Cloud, so the
+  // most recent work is visible on open.
+  const allKeys = new Set();
+  const defaultOpen = new Set();
+  for (const week of weeks) {
+    allKeys.add(week.key);
+    for (const day of week.dayList) {
+      allKeys.add(day.key);
+      allKeys.add(`${day.key}-local`);
+      allKeys.add(`${day.key}-cloud`);
+    }
+  }
+  if (weeks.length) {
+    const w0 = weeks[0];
+    defaultOpen.add(w0.key);
+    if (w0.dayList.length) {
+      const d0 = w0.dayList[0];
+      defaultOpen.add(d0.key);
+      defaultOpen.add(`${d0.key}-local`);
+      defaultOpen.add(`${d0.key}-cloud`);
+    }
+  }
   state.collapsedProcessedGroups = new Set(
-    [...state.collapsedProcessedGroups].filter((key) => validKeys.has(key)),
+    [...state.collapsedProcessedGroups].filter((key) => allKeys.has(key)),
   );
   state.seenProcessedGroups = new Set(
-    [...state.seenProcessedGroups].filter((key) => validKeys.has(key)),
+    [...state.seenProcessedGroups].filter((key) => allKeys.has(key)),
   );
-  for (const group of groups) {
-    if (!state.seenProcessedGroups.has(group.key)) {
-      state.seenProcessedGroups.add(group.key);
-      state.collapsedProcessedGroups.add(group.key);
+  for (const key of allKeys) {
+    if (!state.seenProcessedGroups.has(key)) {
+      state.seenProcessedGroups.add(key);
+      if (!defaultOpen.has(key)) state.collapsedProcessedGroups.add(key);
     }
   }
-  elements.processedTable.innerHTML = groups.map((group) => {
-    const expanded = !state.collapsedProcessedGroups.has(group.key);
-    const header = `
-      <tr class="group-row">
-        <td colspan="6">
-          <button class="group-toggle" type="button" data-group-key="${group.key}">
-            <span>${expanded ? "▾" : "▸"}</span>
-            <span>${group.label} | ${group.photos.length} photo${group.photos.length === 1 ? "" : "s"}</span>
-          </button>
-        </td>
-      </tr>
-    `;
-    if (!expanded) {
-      return header;
+  const isOpen = (key) => !state.collapsedProcessedGroups.has(key);
+
+  if (elements.completedMeta) {
+    if (weeks.length) {
+      const note = state.cloudPanosLoading
+        ? " · refreshing cloud…"
+        : state.cloudPanosError
+          ? ` · cloud unavailable: ${state.cloudPanosError}`
+          : "";
+      elements.completedMeta.textContent = `${localTotal} local · ${cloudTotal} cloud${note}`;
+    } else {
+      elements.completedMeta.textContent = "";
     }
-    const rows = group.photos.map((photo) => {
-      const selected = photo.id === state.selectedPhotoId ? "is-selected" : "";
-      const checked = state.selectedPhotoIds.has(photo.id) ? "checked" : "";
-      return `
-        <tr class="${selected}" data-photo-id="${photo.id}">
-          <td class="selection-cell"><input type="checkbox" data-select-photo-id="${photo.id}" ${checked}></td>
-          <td>${shortPath(photo.original_path)}</td>
-          <td>${fmtDate(photo.capture_ts)}</td>
-          <td>${photo.area_name || "-"}</td>
-          <td>${photo.proposed_filename || "-"}</td>
-          <td>${badge("Renamed")}</td>
-        </tr>
-      `;
-    }).join("");
-    return `${header}${rows}`;
+  }
+
+  if (!weeks.length) {
+    let msg;
+    if (state.cloudPanosLoading) msg = "Loading…";
+    else if (!state.currentProjectId && !cloudTotal) msg = "Create a template to start processing panos.";
+    else msg = "No processed or cloud panos yet.";
+    elements.completedTree.innerHTML = `<p class="muted">${escapeHtml(msg)}</p>`;
+    return;
+  }
+
+  const caret = (open) => `<span class="ctree-caret">${open ? "▾" : "▸"}</span>`;
+  const subGroup = (kind, label, items, key, rowsHtml) => {
+    if (!items.length) return "";
+    const open = isOpen(key);
+    let html = `
+      <div class="ctree-sub ctree-sub-${kind}">
+        <button class="ctree-node ctree-sub-node" type="button" data-group-key="${key}">
+          ${caret(open)}<span class="ctree-sub-label">${label}</span>
+          <span class="ctree-count ${kind}">${items.length}</span>
+        </button>`;
+    if (open) html += `<ul class="ctree-list">${rowsHtml}</ul>`;
+    return html + `</div>`;
+  };
+
+  elements.completedTree.innerHTML = weeks.map((week) => {
+    const wOpen = isOpen(week.key);
+    let block = `
+      <div class="ctree-week">
+        <button class="ctree-node ctree-week-node" type="button" data-group-key="${week.key}">
+          ${caret(wOpen)}<strong>${escapeHtml(week.label)}</strong>
+          <span class="ctree-counts">
+            <span class="ctree-count local">${week.localCount} local</span>
+            <span class="ctree-count cloud">${week.cloudCount} cloud</span>
+          </span>
+        </button>`;
+    if (wOpen) {
+      block += week.dayList.map((day) => {
+        const dOpen = isOpen(day.key);
+        let dblock = `
+          <div class="ctree-day">
+            <button class="ctree-node ctree-day-node" type="button" data-group-key="${day.key}">
+              ${caret(dOpen)}<span class="ctree-day-label">${escapeHtml(day.label)}</span>
+              <span class="ctree-counts">
+                <span class="ctree-count local">${day.local.length}</span>
+                <span class="ctree-count cloud">${day.cloud.length}</span>
+              </span>
+            </button>`;
+        if (dOpen) {
+          const localRows = day.local.map((photo) => {
+            const selected = photo.id === state.selectedPhotoId ? "is-selected" : "";
+            const checked = state.selectedPhotoIds.has(photo.id) ? "checked" : "";
+            return `
+              <li class="ctree-row local ${selected}" data-photo-id="${photo.id}">
+                <input type="checkbox" data-select-photo-id="${photo.id}" ${checked}>
+                <span class="mono ctree-name">${escapeHtml(photo.proposed_filename || shortPath(photo.original_path) || "-")}</span>
+                <span class="ctree-area">${escapeHtml(photo.area_name || "-")}</span>
+              </li>`;
+          }).join("");
+          const cloudRows = day.cloud.map((pano) => `
+            <li class="ctree-row cloud">
+              <span class="mono ctree-name">${escapeHtml(pano.final_name || "-")}</span>
+              <span class="badge cloud-badge">${escapeHtml(pano.computer_name || "Cloud")}</span>
+            </li>`).join("");
+          dblock += subGroup("local", "Local", day.local, `${day.key}-local`, localRows);
+          dblock += subGroup("cloud", "Cloud", day.cloud, `${day.key}-cloud`, cloudRows);
+        }
+        return dblock + `</div>`;
+      }).join("");
+    }
+    return block + `</div>`;
   }).join("");
+}
+
+// Legacy call sites render the processed list or the cloud list independently;
+// both now feed the one unified Completed tree.
+function renderProcessed() {
+  renderCompleted();
 }
 
 // ISO-8601 week (Monday-start), per the issue's "Monday-Sunday calendar week".
@@ -1476,93 +1564,8 @@ function isoWeek(date) {
   return { year: d.getUTCFullYear(), week };
 }
 
-// Group the org's cloud panos Week -> Date(YYMMDD) -> names. Org-global; the
-// pano_registry is not per-template.
-function cloudPanoGroups() {
-  const weeks = new Map();
-  for (const pano of state.cloudPanos) {
-    const date = pano.capture_ts ? new Date(pano.capture_ts) : null;
-    const valid = date && !Number.isNaN(date.getTime());
-    const { year, week } = valid ? isoWeek(date) : { year: 0, week: 0 };
-    const weekKey = valid ? `cloud-week-${year}-W${String(week).padStart(2, "0")}` : "cloud-week-unknown";
-    const weekLabel = valid ? `${year} · Week ${String(week).padStart(2, "0")}` : "Undated";
-    const dateStamp = valid
-      ? `${String(year).slice(2)}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`
-      : "------";
-    const dateKey = `cloud-date-${weekKey}-${dateStamp}`;
-    let weekEntry = weeks.get(weekKey);
-    if (!weekEntry) {
-      weekEntry = { key: weekKey, label: weekLabel, sort: valid ? year * 100 + week : -1, dates: new Map() };
-      weeks.set(weekKey, weekEntry);
-    }
-    let dateEntry = weekEntry.dates.get(dateKey);
-    if (!dateEntry) {
-      dateEntry = { key: dateKey, label: dateStamp, sort: valid ? date.getTime() : -1, panos: [] };
-      weekEntry.dates.set(dateKey, dateEntry);
-    }
-    dateEntry.panos.push(pano);
-  }
-  const weekList = [...weeks.values()].sort((a, b) => b.sort - a.sort);
-  for (const w of weekList) {
-    w.dateList = [...w.dates.values()].sort((a, b) => b.sort - a.sort);
-    for (const dt of w.dateList) {
-      dt.panos.sort((a, b) => (a.final_name || "").localeCompare(b.final_name || ""));
-    }
-  }
-  return weekList;
-}
-
 function renderCloudPanos() {
-  if (!elements.cloudPanosTree) return;
-  if (state.cloudPanosLoading) {
-    elements.cloudPanosTree.innerHTML = `<p class="muted">Loading cloud data…</p>`;
-    return;
-  }
-  if (state.cloudPanosError) {
-    elements.cloudPanosTree.innerHTML = `<p class="muted">Cloud data unavailable: ${escapeHtml(state.cloudPanosError)}</p>`;
-    return;
-  }
-  const weeks = cloudPanoGroups();
-  if (!weeks.length) {
-    elements.cloudPanosTree.innerHTML = `<p class="muted">No cloud panos yet. Panos exported from any computer with shared naming on will appear here.</p>`;
-    return;
-  }
-  const total = state.cloudPanos.length;
-  const collapsed = state.collapsedProcessedGroups;
-  const html = weeks.map((week) => {
-    const wOpen = !collapsed.has(week.key);
-    const wCount = week.dateList.reduce((n, d) => n + d.panos.length, 0);
-    let block = `
-      <div class="cloud-week">
-        <button class="cloud-node cloud-week-toggle" type="button" data-group-key="${week.key}">
-          <span>${wOpen ? "▾" : "▸"}</span><strong>${escapeHtml(week.label)}</strong>
-          <span class="cloud-count">${wCount}</span>
-        </button>`;
-    if (wOpen) {
-      block += week.dateList.map((date) => {
-        const dOpen = !collapsed.has(date.key);
-        let dblock = `
-          <div class="cloud-date">
-            <button class="cloud-node cloud-date-toggle" type="button" data-group-key="${date.key}">
-              <span>${dOpen ? "▾" : "▸"}</span>${escapeHtml(date.label)}
-              <span class="cloud-count">${date.panos.length}</span>
-            </button>`;
-        if (dOpen) {
-          dblock += `<ul class="cloud-name-list">` + date.panos.map((pano) => `
-            <li class="cloud-name-row">
-              <span class="mono">${escapeHtml(pano.final_name)}</span>
-              <span class="badge cloud-badge">${pano.is_own ? "This PC" : escapeHtml(pano.computer_name || "Cloud")}</span>
-            </li>`).join("") + `</ul>`;
-        }
-        return dblock + `</div>`;
-      }).join("");
-    }
-    return block + `</div>`;
-  }).join("");
-  elements.cloudPanosTree.innerHTML = html;
-  if (elements.cloudPanosMeta) {
-    elements.cloudPanosMeta.textContent = `${total} pano${total === 1 ? "" : "s"} across the organization`;
-  }
+  renderCompleted();
 }
 
 function archiveSelectedPhotos() {
@@ -4158,7 +4161,7 @@ function handlePhotoSelection(event) {
     togglePhotoSelection(Number(checkbox.dataset.selectPhotoId), checkbox.checked);
     return;
   }
-  const row = event.target.closest("tr[data-photo-id]");
+  const row = event.target.closest("[data-photo-id]");
   if (!row) return;
   state.selectedPhotoId = Number(row.dataset.photoId);
   renderPhotos();
@@ -4211,18 +4214,6 @@ function handleCloudVisibilityChange() {
   // is no local geometry (renderMap early-returns on "no bounds" in that case).
   if (state.leaflet) syncCloudLayer(state.leaflet);
   renderMap();
-}
-
-function handleCloudTreeClick(event) {
-  const toggle = event.target.closest("[data-group-key]");
-  if (!toggle) return;
-  const key = toggle.dataset.groupKey;
-  if (state.collapsedProcessedGroups.has(key)) {
-    state.collapsedProcessedGroups.delete(key);
-  } else {
-    state.collapsedProcessedGroups.add(key);
-  }
-  renderCloudPanos();
 }
 
 function handleMapDateFilterChange() {
@@ -4693,7 +4684,7 @@ elements.areasTable.addEventListener("change", (event) => {
   handleAreaAction(event).catch((error) => setStatus(error.message, true));
 });
 elements.photosTable.addEventListener("click", handlePhotoSelection);
-elements.processedTable.addEventListener("click", handlePhotoSelection);
+elements.completedTree.addEventListener("click", handlePhotoSelection);
 elements.archiveFoldersList.addEventListener("click", handleArchiveClick);
 elements.archivePhotosTable.addEventListener("click", handleArchiveClick);
 elements.collectionsList.addEventListener("click", handleCollectionsClick);
@@ -4715,9 +4706,6 @@ elements.mapProposedLabelToggle.addEventListener("change", handleMapLabelToggleC
 elements.mapShowProcessedToggle.addEventListener("change", handleMapVisibilityChange);
 if (elements.mapShowCloudToggle) {
   elements.mapShowCloudToggle.addEventListener("change", handleCloudVisibilityChange);
-}
-if (elements.cloudPanosTree) {
-  elements.cloudPanosTree.addEventListener("click", handleCloudTreeClick);
 }
 if (elements.cloudRefreshButton) {
   elements.cloudRefreshButton.addEventListener("click", () => {

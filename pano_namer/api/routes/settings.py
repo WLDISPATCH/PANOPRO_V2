@@ -116,6 +116,11 @@ def register_settings_routes(app: FastAPI, db: Database, storage: StorageService
         own = settings.resolved_computer_name()
         panos: list[dict[str, Any]] = []
         for row in rows:
+            # Skip this computer's own exports — they already live in the local
+            # Completed list, so the cloud view shows only what other machines
+            # shot. computer_name is the discriminator.
+            if own and row.get("computer_name") == own:
+                continue
             lat, lon = row.get("gps_lat"), row.get("gps_lon")
             projected_x = projected_y = None
             if lat is not None and lon is not None:
@@ -127,8 +132,7 @@ def register_settings_routes(app: FastAPI, db: Database, storage: StorageService
                     "capture_ts": row.get("capture_ts"),
                     "projected_x": projected_x,
                     "projected_y": projected_y,
-                    "is_own": bool(row.get("computer_name"))
-                    and row.get("computer_name") == own,
+                    "is_own": False,
                 }
             )
         return {"ok": True, "connected": True, "panos": panos, "error": None}
