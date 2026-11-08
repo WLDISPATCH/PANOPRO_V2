@@ -37,6 +37,12 @@ create policy shared_overlays_anon_all
     using (true)
     with check (true);
 
+-- RLS policies only filter rows; the anon role also needs table privileges.
+-- Without these grants every request fails with
+-- "permission denied for table shared_overlays" (Postgres error 42501).
+grant usage on schema public to anon;
+grant select, insert, update, delete on table public.shared_overlays to anon;
+
 -- Storage bucket for the overlay image files (same shape as area-files).
 insert into storage.buckets (id, name, public)
 values ('overlay-files', 'overlay-files', true)

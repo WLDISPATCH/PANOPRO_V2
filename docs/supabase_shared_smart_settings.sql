@@ -24,3 +24,9 @@ create policy shared_smart_settings_anon_all
     to anon
     using (true)
     with check (true);
+
+-- RLS policies only filter rows; the anon role also needs table privileges.
+-- Without these grants every request fails with
+-- "permission denied for table shared_smart_settings" (Postgres error 42501).
+grant usage on schema public to anon;
+grant select, insert, update, delete on table public.shared_smart_settings to anon;

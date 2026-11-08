@@ -6,14 +6,9 @@ same Supabase transport as shared naming / area sync. Resolution is
 whole-list last-writer-wins on ``updated_at`` -- no per-name tombstones are
 needed because the entire list is replaced on each edit.
 
-Supabase table (run once in the SQL editor):
-
-    create table if not exists shared_smart_settings (
-        key text primary key,
-        value jsonb not null default '[]'::jsonb,
-        computer_name text,
-        updated_at timestamptz not null default now()
-    );
+Supabase setup: run docs/supabase_shared_smart_settings.sql once in the SQL
+editor. It creates the table, the anon RLS policy and the table grants; a
+missing grant shows up as "permission denied for table shared_smart_settings".
 """
 
 from __future__ import annotations
